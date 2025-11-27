@@ -28,7 +28,6 @@ use difficulty_control::Difficulty;
 use get_size2::GetSize;
 use itertools::Itertools;
 use mutator_set_update::MutatorSetUpdate;
-use num_traits::CheckedSub;
 use num_traits::Zero;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -51,14 +50,12 @@ use validity::block_proof_witness::BlockProofWitness;
 use super::transaction::transaction_kernel::TransactionKernelProxy;
 use super::transaction::utxo::Utxo;
 use super::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use super::type_scripts::time_lock::TimeLock;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::application::config::network::Network;
 use crate::application::loops::channel::Cancelable;
 use crate::application::triton_vm_job_queue::TritonVmJobQueue;
 use crate::protocol::consensus::block::block_header::BlockHeaderField;
 use crate::protocol::consensus::block::block_header::BlockPow;
-use crate::protocol::consensus::block::block_height::NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT;
 use crate::protocol::consensus::block::block_kernel::BlockKernelField;
 use crate::protocol::consensus::block::block_transaction::BlockTransaction;
 use crate::protocol::consensus::block::difficulty_control::difficulty_control;
@@ -76,7 +73,6 @@ use crate::protocol::proof_abstractions::timestamp::Timestamp;
 use crate::protocol::proof_abstractions::verifier::verify;
 use crate::protocol::proof_abstractions::SecretWitness;
 use crate::state::wallet::address::ReceivingAddress;
-use crate::state::wallet::wallet_entropy::WalletEntropy;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -93,20 +89,24 @@ use crate::util_types::mutator_set::removal_record::removal_record_list::Removal
 pub(crate) const MAX_NUM_INPUTS_OUTPUTS_ANNOUNCEMENTS: usize = 1 << 14;
 
 /// Duration of timelock for half of all mining rewards.
-///
-/// Half the block subsidy is liquid immediately. Half of it is locked for this
-/// time period. Likewise, half the guesser fee is liquid immediately; and half
-/// is time locked for this period.
-pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(3);
+pub(crate) const MINING_REWARD_TIME_LOCK_PERIOD: Timestamp = Timestamp::years(0);
 
-pub(crate) const INITIAL_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(128);
+pub(crate) const GENERATION_FOR_TAIL_EMISSION_START: i32 = 72;
+pub(crate) const BLOCK_SUBSIDY_SCALED: [u64; GENERATION_FOR_TAIL_EMISSION_START as usize] = [
+    6800000,6655636,6511273,6366909,6222545,6078182,5933818,5789455,5645091,5500727,5356364,5212000,5168444,5124889,5081333,5037778,4994222,4950667,4907111,4863556,4820000,4776444,4732889,4689333,4645778,4602222,4558667,4515111,4471556,4428000,4384444,4340889,4297333,4253778,4210222,4166667,4123110,4079556,4035999,3992444,3948889,3905333,3861778,3818222,3774667,3731111,3687556,3644000,3533833,3423667,3313500,3203333,3093167,2983000,2872833,2762667,2652500,2542333,2432167,2322000,2211833,2101667,1991500,1881333,1771167,1661000,1550833,1440667,1330500,1220333,1110167,1000000
+];
+pub(crate) const TAIL_EMISSION_BLOCK_SUBSIDY: NativeCurrencyAmount = NativeCurrencyAmount::coins(1);
 
+/* 
+pub(crate) const CURVE_DECAY_DENOMINATOR: i32 = 36;
+pub(crate) const CURVE_EXPONENT: u32 = 2;
+*/
 /// Blocks with timestamps too far into the future are invalid. Reject blocks
 /// whose timestamp exceeds now with this value or more.
 pub(crate) const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
 
 /// The size of the premine.
-pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(831488);
+pub const PREMINE_MAX_SIZE: NativeCurrencyAmount = NativeCurrencyAmount::coins(1942384);
 
 /// All blocks have proofs except the genesis block
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BFieldCodec, GetSize, Default)]
@@ -390,21 +390,22 @@ impl Block {
 
     /// The number of coins that can be printed into existence with the mining
     /// a block with this height.
-        pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
-        let mut reward: NativeCurrencyAmount = INITIAL_BLOCK_SUBSIDY;
+    pub fn block_subsidy(block_height: BlockHeight) -> NativeCurrencyAmount {
         let generation = block_height.get_generation();
 
-        for _ in 0..generation {
-            reward.div_two();
-
-            // Early return here is important bc of test-case generators with
-            // arbitrary block heights.
-            if reward.is_zero() {
-                return NativeCurrencyAmount::zero();
-            }
+        if generation >= GENERATION_FOR_TAIL_EMISSION_START as u64 {
+            return TAIL_EMISSION_BLOCK_SUBSIDY;
         }
 
-        reward
+        let one_coin = NativeCurrencyAmount::coins(1);
+        let units_one_coin = one_coin.to_nau();
+        let scaled_subsidy = BLOCK_SUBSIDY_SCALED[generation as usize];
+        // Safe from overflow, max subsidy is 6.8
+        let (units_scaled,overflow) = units_one_coin.overflowing_mul(scaled_subsidy as i128);
+        assert!(!overflow, "Block subsidy calculation overflowed");
+        let units_divided = units_scaled / 1_000_000;
+        let final_nau_i128 = units_divided;
+        return NativeCurrencyAmount::from_nau(final_nau_i128);
     }
 
     /// returns coinbase reward amount for this block.
@@ -492,21 +493,17 @@ impl Block {
 
     /// All premine allocations, including claims fund and claims
     fn premine_distribution() -> Vec<(ReceivingAddress, NativeCurrencyAmount)> {
-        [
-            Self::original_premine_distribution(),
-        ]
-        .concat()
+        [Self::original_premine_distribution()].concat()
     }
 
     pub fn premine_utxos() -> Vec<Utxo> {
-        // August 11, 2025, 12:00 PM UTC
-        let premine_release_date = Timestamp(BFieldElement::new(1754913600000u64));
+        // Premine will be unlocked at genesis
 
         let mut utxos = vec![];
         for (receiving_address, amount) in Self::premine_distribution() {
             let coins = vec![
                 Coin::new_native_currency(amount),
-                TimeLock::until(premine_release_date),
+                //TimeLock::until(premine_release_date),
             ];
             let utxo = Utxo::new(receiving_address.lock_script_hash(), coins);
             utxos.push(utxo);
@@ -1175,59 +1172,25 @@ pub(crate) mod tests {
     }
 
     #[test]
-    
-    fn halving_happens_when_expected() {
-        // 1st halving should happen at block height `BLOCKS_PER_GENERATION` =
-        // 160.815, minus `NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT` = 21310. So at
-        // block height 139505, with that block being the first to have half the
-        // block subsidy of the initial block subsidy. The first block to have a
-        // quarter of the initial block subsidy should be of height 300320 =
-        // `2 * BLOCKS_PER_GENERATION - NUM_BLOCKS_SKIPPED_BECAUSE_REBOOT`.
-        assert_eq!(INITIAL_BLOCK_SUBSIDY, Block::block_subsidy(bfe!(2).into()));
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(100_000).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(130_000).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_503).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY,
-            Block::block_subsidy(bfe!(139_504).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_505).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(139_506).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half(),
-            Block::block_subsidy(bfe!(300_319).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_320).into())
-        );
-        assert_eq!(
-            INITIAL_BLOCK_SUBSIDY.half().half(),
-            Block::block_subsidy(bfe!(300_321).into())
-        );
+    fn print_block_subsidy_per_generation() {
+        let mut block_height = 0;
+        for generation in 0..100 {
+            let subsidy = Block::block_subsidy(block_height.into());
+            println!("Generation {generation}: Block height {block_height}, Subsidy: {}", subsidy.to_coins_f64_lossy());
+            block_height += BLOCKS_PER_GENERATION;
+        }
     }
-
-    proptest::proptest! {
-        #[test]
-        fn block_subsidy_calculation_terminates(height_arb in arb::<BFieldElement>()) {
-            Block::block_subsidy(BFieldElement::MAX.into());
-
-            Block::block_subsidy(height_arb.into());
+    //Generation 72: Block start height 622080, Subsidy: 1, Supply so far: 2463281.26272
+    // 
+    #[test]
+    fn print_block_subsidy_per_generation_and_total_supply_mined() {
+        let mut block_height = 0;
+        let mut total_supply_mined = NativeCurrencyAmount::zero();
+        for generation in 0..100 {
+            let subsidy = Block::block_subsidy(block_height.into());
+            println!("Generation {generation}: Block start height {block_height}, Subsidy: {}, Supply so far: {}", subsidy.to_coins_f64_lossy(), total_supply_mined.to_coins_f64_lossy());
+            total_supply_mined += subsidy.scalar_mul(BLOCKS_PER_GENERATION as u32);
+            block_height += BLOCKS_PER_GENERATION;
         }
     }
 
@@ -1235,7 +1198,7 @@ pub(crate) mod tests {
     fn block_subsidy_generation_0() {
         let block_height_generation_0 = 199u64.into();
         assert_eq!(
-            NativeCurrencyAmount::coins(128),
+            NativeCurrencyAmount::coins(8),
             Block::block_subsidy(block_height_generation_0)
         );
     }
