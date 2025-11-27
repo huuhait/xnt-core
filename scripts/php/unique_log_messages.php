@@ -1,7 +1,7 @@
 #!/usr/bin/env php
 <?php
 
-// A simple script to parse a neptune-core log file and dedup log messages
+// A simple script to parse a xnt-core log file and dedup log messages
 // of a given type  (INFO, WARN, ERROR, DEBUG), or any type if omitted.
 
 
@@ -27,7 +27,7 @@ while(!$file->eof()) {
 		}
 	}
 
-	$cut_at = strpos($line, "neptune_cash::");
+	$cut_at = strpos($line, "neptune_privacy::");
 	if(!$cut_at) {
 		continue;
 	}

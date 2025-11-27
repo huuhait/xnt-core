@@ -1,5 +1,7 @@
 # Summary
 
+The official documentation from ([Neptune](https://github.com/Neptune-Crypto/neptune-core)) protocol
+
 - [Main](./main.md)
 - [Consensus](./consensus.md)
   - [Transaction](./consensus/transaction.md)
@@ -8,7 +10,7 @@
   - [Neptune Coins](./consensus/neptune-coins.md)
   - [Mining](./consensus/mining.md)
   - [Succinctness](./consensus/succinctness.md)
-- [Neptune-Core](./neptune-core.md)
+- [neptune-core](./neptune-core.md)
   - [Overview](./neptune-core/overview.md)
   - [Events](./neptune-core/events.md)
   - [Syncing](./neptune-core/syncing.md)

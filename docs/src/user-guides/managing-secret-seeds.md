@@ -6,7 +6,7 @@ The wallet derives all spending keys and receiving addresses from a secret seed.
 
 ## Wallet File
 
-By default, `neptune-core` stores the wallet secret seed to and reads it from `[data-dir]/neptune/[network]/wallet/wallet.dat`. Here `[data-dir]` is the data directory and this directory is the second line in the log output when running `neptune-core`. The `[network]` is `main` unless you are not on mainnet.
+By default, `xnt-core` stores the wallet secret seed to and reads it from `[data-dir]/neptune/[network]/wallet/wallet.dat`. Here `[data-dir]` is the data directory and this directory is the second line in the log output when running `xnt-core`. The `[network]` is `main` unless you are not on mainnet.
 
 A convenient command is `> neptune-cli which-wallet`, which shows the location of the wallet file.
 
@@ -22,9 +22,9 @@ If you do receive transactions with off-chain UTXO notifications, it is recommen
 
 ## New Secret Seed
 
-By default, `neptune-core` will read the wallet file. If none exists, it will generate one and populate it with a random secret seed.
+By default, `xnt-core` will read the wallet file. If none exists, it will generate one and populate it with a random secret seed.
 
-To generate a new secret seed and `wallet.dat` without starting `neptune-core`, use the CLI: `> neptune-cli generate-wallet`.
+To generate a new secret seed and `wallet.dat` without starting `xnt-core`, use the CLI: `> neptune-cli generate-wallet`.
 
 Note that this command does nothing if the wallet file already exists. If you want to invoke this command even though a `wallet.dat` file already exists, rename it first.
 

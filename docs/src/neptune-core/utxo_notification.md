@@ -10,7 +10,7 @@ There are two broad possibilities:
 1. write the secrets to the blockchain, encrypted to the recipient
 2. do not write secrets to the blockchain. Use some out-of-band method instead.
 
-`neptune-core` supports both of these.  They are referred to as notification methods.  An enum `UtxoNotifyMethod` exists and provides variant `OnChain` and `OffChain`.
+`xnt-core` supports both of these.  They are referred to as notification methods.  An enum `UtxoNotifyMethod` exists and provides variant `OnChain` and `OffChain`.
 
 It is also important to recognize that sometimes the sender and receiver may be the same wallet or two wallets owned by the same person or organization.
 
@@ -37,7 +37,7 @@ The simplest and most obvious solution is to attempt to decrypt the ciphertext o
 
 We can do better.
 
-#### How `neptune-core` solves it.
+#### How `xnt-core` solves it.
 
 This is where the `key-type` and `receiver_identifier` of the `PublicAnnouncement` come into play.
 
@@ -75,14 +75,14 @@ Many types of OffChain transfers are possible.  examples:
 
 3. External / Serialized  (proposed)
 
-In the future `neptune-core` or a 3rd party wallet might support using a
+In the future `xnt-core` or a 3rd party wallet might support using a
 decentralized storage mechanism such as IPFS.  Decentralized storage may provide a solution for ongoing wallet backups or primary wallet storage to minimize risk of funds loss, as discussed below.
 
 ### Warning! Risk of funds loss
 
 It is important to recognize that all `OffChain` methods carry an extra risk of losing funds as compared to `OnChain` notification.  Since the secrets do not exist anywhere on the blockchain they can never be restored by the wallet if lost during or any time after the transfer.
 
-For example Bob performs an off-chain utxo transfer to Sally.  Everything goes fine and Sally receives the notification and her wallet successfully identifies and validates the funds.  Six months later Sally's hard-drive crashes and she doesn't have any backup except for her seed-phrase.  She imports the seed-phrase into a new neptune-core wallet.  The wallet then scans the blockchain for `Utxo` that belong to Sally.   Unfortunately the wallet might not be able to recognize or claim the `Utxo` that she received via `OffChain` notification.
+For example Bob performs an off-chain utxo transfer to Sally.  Everything goes fine and Sally receives the notification and her wallet successfully identifies and validates the funds.  Six months later Sally's hard-drive crashes and she doesn't have any backup except for her seed-phrase.  She imports the seed-phrase into a new xnt-core wallet.  The wallet then scans the blockchain for `Utxo` that belong to Sally.   Unfortunately the wallet might not be able to recognize or claim the `Utxo` that she received via `OffChain` notification.
 
 For this reason, it becomes crucial to maintain ongoing backups/redundancy of wallet data when receiving payments via OffChain notification.  And/or to ensure that the OffChain mechanism can reasonably provide data storage indefinitely into the future.
 
@@ -94,7 +94,7 @@ With the scary stuff out of the way, let's look at some `OffChain` notification 
 
 ### Local state.
 
-note: `neptune-core` already supports `OffChain` notifications via local state.
+note: `xnt-core` already supports `OffChain` notifications via local state.
 
 Local state transfers are useful when a wallet makes a payment to itself.
 Self-payments occur for almost every transaction when a change output is
@@ -113,9 +113,9 @@ claimed, and add it to the list of wallet-owned `Utxo` called `monitored_utxos`.
 
 ### Neptune p2p network
 
-note: concept only. not yet supported in `neptune-core`.
+note: concept only. not yet supported in `xnt-core`.
 
-`Utxo` secrets that are destined for 3rd party wallets can be distributed via the neptune P2P network. This would use the same p2p protocol that distributes transactions and blocks however the secrets would be stored in a separate `UtxoNotificationPool` inside each neptune-core node.
+`Utxo` secrets that are destined for 3rd party wallets can be distributed via the neptune P2P network. This would use the same p2p protocol that distributes transactions and blocks however the secrets would be stored in a separate `UtxoNotificationPool` inside each xnt-core node.
 
 There are challenges with keeping the data around in perpetuity as this would place a great storage burden on p2p nodes. A solution outside the p2p network might be required for that.
 
@@ -123,13 +123,13 @@ There are challenges with keeping the data around in perpetuity as this would pl
 
 note: this is a proposed mechanism.  It does not exist at time of writing.
 
-The idea here is that the transfer and ongoing storage takes place completely outside of `neptune-core`.
+The idea here is that the transfer and ongoing storage takes place completely outside of `xnt-core`.
 
-1. When a transaction is sent `neptune-core` would provide a serialized data structure, eg `OffchainUtxoNotification` containing fields: key_type, receiver_identifier, ciphertext(utxo, sender_randomness) for each `OffChain` output.   Note that these are the exact fields stored in `PublicAnnouncement` for notifications.
+1. When a transaction is sent `xnt-core` would provide a serialized data structure, eg `OffchainUtxoNotification` containing fields: key_type, receiver_identifier, ciphertext(utxo, sender_randomness) for each `OffChain` output.   Note that these are the exact fields stored in `PublicAnnouncement` for notifications.
 
 2. Some external process then transfers the serialized data to the intended recipient.
 
-3. The recipient then invokes the `claim_utxos()` RPC api and passes in a list of serialized `OffchainUtxoNotification`.  `neptune-core` then attempts to recognize and claim each one, just as if it had been found on the blockchain.
+3. The recipient then invokes the `claim_utxos()` RPC api and passes in a list of serialized `OffchainUtxoNotification`.  `xnt-core` then attempts to recognize and claim each one, just as if it had been found on the blockchain.
 
 4. Optionally the recipient could pass a flag to `claim_utxos()` that would cause it to initiate a new `OnChain` payment into the recipient's wallet.  This could serve a couple purposes:
     * using `OnChain` notification minimizes future data-loss risk for recipient.

@@ -1,6 +1,6 @@
 # Events
 
-neptune-core can be seen as an event-driven program. Below is a list of all the events, and the messages that these events create.
+xnt-core can be seen as an event-driven program. Below is a list of all the events, and the messages that these events create.
 
 ## Events
 

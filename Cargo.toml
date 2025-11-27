@@ -2,11 +2,11 @@
 resolver="2"
 
 members = [
-    "neptune-core",
-    "neptune-core-cli",
-    "neptune-dashboard",
-    "neptune-rpc/macros",
-    "neptune-rpc/client",
+    "xnt-core",
+    "xnt-core-cli",
+    "xnt-dashboard",
+    "xnt-rpc/macros",
+    "xnt-rpc/client",
 ]
 
 [workspace.lints.rust]

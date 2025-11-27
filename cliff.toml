@@ -29,7 +29,7 @@ footer = "Note: (!) indicates a breaking change.\n"
 trim = true
 
 postprocessors = [
-  { pattern = '<REPO>', replace = "https://github.com/Neptune-Crypto/neptune-core" },
+  { pattern = '<REPO>', replace = "https://github.com/Neptune-Crypto/xnt-core" },
 ]
 
 [git]

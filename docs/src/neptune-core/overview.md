@@ -1,9 +1,9 @@
 # Neptune Core Overview
-`neptune-core` uses the [tokio](https://tokio.rs/tokio/tutorial) async framework and tokio's multi-threaded executor which assigns tasks to threads in a threadpool and requires the use of thread synchronization primitives.  We refer to spawned tokio tasks as `tasks` but you can think of them as threads if that fits your mental model better.  Note that a tokio task may (or may not) run on a separate operating system thread from that task that spawned it, at tokio's discretion.
+`xnt-core` uses the [tokio](https://tokio.rs/tokio/tutorial) async framework and tokio's multi-threaded executor which assigns tasks to threads in a threadpool and requires the use of thread synchronization primitives.  We refer to spawned tokio tasks as `tasks` but you can think of them as threads if that fits your mental model better.  Note that a tokio task may (or may not) run on a separate operating system thread from that task that spawned it, at tokio's discretion.
 
-`neptune-core` connects to other clients through TCP/IP and accepts calls to its RPC server via [tarpc](https://github.com/google/tarpc) using json serialization over the [serde_transport](https://docs.rs/tarpc/latest/tarpc/serde_transport/index.html).  The project also includes `neptune-cli` a command-line client and `neptune-dashboard`, a cli/tui wallet tool.  Both interact with `neptune-core` via the tarpc RPC protocol.
+`xnt-core` connects to other clients through TCP/IP and accepts calls to its RPC server via [tarpc](https://github.com/google/tarpc) using json serialization over the [serde_transport](https://docs.rs/tarpc/latest/tarpc/serde_transport/index.html).  The project also includes `neptune-cli` a command-line client and `xnt-dashboard`, a cli/tui wallet tool.  Both interact with `xnt-core` via the tarpc RPC protocol.
 
-## Long-lived async tasks of neptune-core binary
+## Long-lived async tasks of xnt-core binary
 There are four classes of tasks:
 - `main`: handles init and `main_loop`
 - `peer[]`: handles `connect_to_peers` and `peer_loop`
@@ -77,7 +77,7 @@ From `tokio`
 From Std lib:
 - `Arc`
 
-From neptune-core:
+From xnt-core:
 - `neptune_core::locks::tokio::AtomicRw`  (wraps `Arc<tokio::sync::RwLock>`)
 
 ## Persistent Memory
@@ -98,7 +98,7 @@ Blocks are stored on disk and their position on disk is stored in the `block_ind
 
   2. avoid deadlocking others. Always be certain that the global lock will be released in timely fashion. In other words if you have some kind of long running task with an event loop that needs to acquire the global lock, ensure that it gets acquired+released inside the loop rather than outside.
 
-- Atomic writing to databases: `neptune-core` presently writes to the following databases: wallet_db, block_index_db, archival_mutator_set, peer_state. If one of the databases are updated but the other is not, this can leave data in an invalid state. We could fix this by storing all state in a single transactional database but that might make the code base less modular.
+- Atomic writing to databases: `xnt-core` presently writes to the following databases: wallet_db, block_index_db, archival_mutator_set, peer_state. If one of the databases are updated but the other is not, this can leave data in an invalid state. We could fix this by storing all state in a single transactional database but that might make the code base less modular.
 
 note: We should also add logic to rebuild the archival state from the `block_index_db` and the blocks stored on disk since it can be derived from the blocks. This functionality could be contained in a separate binary or a check could be performed at startup.
 
@@ -138,4 +138,4 @@ Note that the client exists quickly, so here the `.pretty()` tracing subscriber 
 
 `neptune-cli` is a separate program with a separate address space. This means the `state` object (see further down) is not available, and all data from Neptune Core must be received via RPC.
 
-`neptune-cli` does not have any long-lived tasks but rather receives individual commands via CLI, sends a query to neptune-core, presents the response, and exits.
+`neptune-cli` does not have any long-lived tasks but rather receives individual commands via CLI, sends a query to xnt-core, presents the response, and exits.

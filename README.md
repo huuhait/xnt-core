@@ -1,11 +1,10 @@
-# Neptune Core
+# xnt — Neptune Privacy Core
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![GitHub CI](https://github.com/Neptune-Crypto/neptune-core/actions/workflows/main.yml/badge.svg)](https://github.com/Neptune-Crypto/neptune-core/actions/workflows/main.yml)
-[![crates.io](https://img.shields.io/crates/v/neptune-cash.svg)](https://crates.io/crates/neptune-cash)
-[![Coverage Status](https://coveralls.io/repos/github/Neptune-Crypto/neptune-core/badge.svg?branch=master)](https://coveralls.io/github/Neptune-Crypto/neptune-core?branch=master)
+![Coverage Status](https://img.shields.io/badge/coverage-unknown-lightgrey)
 
-Neptune-core is the reference implementation for the [Neptune Cash](https://neptune.cash/) protocol.
+**xnt-core** is the reference implementation for **xnt (Neptune Privacy)** — a privacy-focused decentralized digital cash protocol derived from Neptune Cash.
+
 
 ## Disclaimer
 
@@ -27,8 +26,8 @@ Neptune-core is the reference implementation for the [Neptune Cash](https://nept
 - Source the rust environment: `source "$HOME/.cargo/env"`
 - Install build tools: `sudo apt install build-essential`
 - Install LevelDB: `sudo apt install libleveldb-dev libsnappy-dev cmake`
-- Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
-- Enter the repository: `cd neptune-core`
+- Download the repository: `git clone https://github.com/neptuneprivacy/xnt-core.git`
+- Enter the repository: `cd xnt-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for the *unstable development*
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`): `make install-linux`
@@ -48,15 +47,15 @@ Windows should just work out-of-the-box with cargo build etc.
 
 - Download and run the CMake installer from the [website](https://cmake.org/download/).
 - Open PowerShell to run the following commands.
-- Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
-- Enter the repository: `cd neptune-core`
+- Download the repository: `git clone https://github.com/neptuneprivacy/xnt-core.git`
+- Enter the repository: `cd xnt-core`
 - Checkout the release branch `git checkout release`. (Alternatively, for an *unstable development*
   branch, skip this step.)
 - Build for release and put the binaries in your local path (`~/.cargo/bin/`):
   ```
-  cargo install --locked --path neptune-core
-  cargo install --locked --path neptune-core-cli
-  cargo install --locked --path neptune-dashboard
+  cargo install --locked --path xnt-core
+  cargo install --locked --path xnt-core-cli
+  cargo install --locked --path xnt-dashboard
   ```
 
 ### MacOS
@@ -70,23 +69,37 @@ Windows should just work out-of-the-box with cargo build etc.
  - Install LevelDB: `brew install leveldb`
  - Install cmake: `brew install cmake`
  - Install git: `brew install git`
- - Download the repository: `git clone https://github.com/Neptune-Crypto/neptune-core.git`
- - Enter the repository: `cd neptune-core`
+ - Download the repository: `git clone https://github.com/neptuneprivacy/xnt-core.git`
+ - Enter the repository: `cd xnt-core`
  - Build for release and put the binaries in your local path: `make install`
 
 ## Running & Connecting
 
-- Generate a wallet file: `neptune-cli generate-wallet`
-- Run neptune-core daemon: `neptune-core` with flags
+- Generate a wallet file manually using: `./xnt-cli generate-wallet`
+- Or simply start the node — a wallet will be automatically created if one doesn’t exist.
+- Run xnt-core daemon: `xnt-core` with flags
     - `--peer [ip_address:port]` to connect to a given peer, for instance
-      `--peer 51.15.139.238:9798` or `--peer 139.162.193.206:9798` or
-      `--peer [2001:bc8:17c0:41e:46a8:42ff:fe22:e8e9]:9798`.
-    - `--compose --guess` to mine — if you want to generate coins
+      `--peer 161.97.150.88:9898` or `--peer [TO_BE_COMPLETED]`
+    - `--compose` to become a composer — generate blocks for miners and earn fees from them
+    - `--guess` to mine — if you want to generate coins
     - `--help` to get a list of available command-line arguments
+
+The minimum requirements for composing are:
+   - At least 128 GB of RAM
+   - At least 32 cores of CPU
 
 If you don't have a static IPv4, then try connecting to other nodes with IPv6. It's our experience
 that you will then be able to open and receive connections to other nodes through Nepture Core's
 built-in peer-discovery process.
+
+## Wallet
+
+There are two ways to create a wallet:
+   - Import an existing wallet using your seed phrase: ./xnt-cli import-seed-phrase
+   - Start the node without an existing wallet, and one will be automatically generated. After that, do NOT forget to save your seed phrase using: ./xnt-cli export-seed-phrase
+
+Your wallet is stored unencrypted in ~/.local/share/xnt, so make sure you run the node on a trusted machine.
+To send or receive coins, use ./xnt-dashboard for a simple user interface.
 
 ## Documentation
 
@@ -101,7 +114,7 @@ Documentation uses [https://rust-lang.github.io/mdBook/](mdBook). To run a local
 This software comes with a dashboard that communicates with the daemon. The dashboard is a
 console-based user interface to generate addresses, receive and send money, and monitor the behavior
 of the client. The daemon must be running before the dashboard is started. To start the dashboard,
-run: `neptune-dashboard`. (If you set daemon's RPC port to a custom value specify that value with
+run: `xnt-dashboard`. (If you set daemon's RPC port to a custom value specify that value with
 the flag `--port [port]`.)
 
 ## Command-Line Interface
@@ -111,16 +124,16 @@ This can be invoked from another terminal window when the daemon is running. To 
 commands, execute
 
 ```
-neptune-cli --help
+xnt-cli --help
 ```
 
 To get e.g. the block height of a running daemon, execute
 
 ```
-neptune-cli block-height
+xnt-cli block-height
 ```
 
-If you set up `neptune-core` to listen for RPC requests on a different port from the default (9799),
+If you set up `xnt-core` to listen for RPC requests on a different port from the default (9899),
 then the flag `--port <port>` is your friend.
 
 ## Setup for Development (Ubuntu)
@@ -131,11 +144,6 @@ then the flag `--port <port>` is your friend.
 - in `vscode` activate format-on-save via `File` > `Preferences` > `Settings` then check the box
   for "Format on Save"
 - install `cpulimit` for nicer, and more quiet integration tests: `apt install cpulimit`
-
-## Branches and Pull Requests
-
-Please see [documentation](https://docs.neptune.cash/contributing/git-workflow.html) of our
-branching methodology and how to submit a pull request.
 
 ## Logging
 
@@ -156,21 +164,17 @@ stdout through `sed` with the below command. This will only print the namespace 
 and the log text. The log output can also be stored to file by piping it to `tee`, like this:
 `cargo run 2>&1 | tee -a integration_test.log`.
 
-```
-sed 's/.*neptune_core:\+\(.*\)/\1/g'
-```
-
 ## Running tokio-console
 
 [tokio-console](https://github.com/tokio-rs/console) is a tool for monitoring tokio tasks and
 resources/locks in real-time. Kind of like unix `top`, but for a single application.
 
-tokio-console support is not built into neptune-core by default. It requires building with
+tokio-console support is not built into xnt-core by default. It requires building with
 `--features tokio-console`.
 
-To use tokio-console with neptune-core:
+To use tokio-console with xnt-core:
 
-1. build and install neptune-core with tokio-console support.
+1. build and install xnt-core with tokio-console support.
 
    `cargo install --features tokio-console --locked --path .`
 
@@ -181,9 +185,9 @@ To use tokio-console with neptune-core:
 
 3. run tokio-console in a terminal
 
-4. run neptune-core in a separate terminal, passing the --tokio-console flag.
+4. run xnt-core in a separate terminal, passing the --tokio-console flag.
 
-   `neptune-core --tokio-console [other-arguments]`
+   `xnt-core --tokio-console [other-arguments]`
 
 ## Local Integration Test Strategy
 
@@ -230,4 +234,4 @@ these files:
 - `<data_directory>/<network>/wallet/outgoing_randomness.dat`.
 
 On Linux, with the standard settings, the `data_directory` is
-`~/.local/share/neptune/`.
+`~/.local/share/xnt/`.

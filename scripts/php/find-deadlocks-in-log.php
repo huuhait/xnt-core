@@ -1,14 +1,14 @@
 #!/usr/bin/env php
 <?php
 
-// A simple script to parse a neptune-core log file and count how many times a
+// A simple script to parse a xnt-core log file and count how many times a
 // lock was acquired and released for each location (acquired)
 //
 // If a discrepancy is found between number of acquire and release, it is
 // reported.  This typically indicates a lock that is not being released and
 // thus is the cause of a hang/deadlock.
 //
-// note that neptune-core must be built with --features log-lock_events.  if
+// note that xnt-core must be built with --features log-lock_events.  if
 // not, it will not emit the necessary log messages.
 
 
@@ -23,7 +23,7 @@ $lines = file($path);
 $locations = [];
 
 // sample line:
-//        |-- lock_event=Acquire { info: LockInfo { name: Some("RustyWalletDatabase-Schema"), lock_type: RwLock }, acquisition: Read, try_acquire_at: Some(Instant { tv_sec: 25730099, tv_nsec: 617232523 }), acquire_at: Some(Instant { tv_sec: 25730099, tv_nsec: 617348321 }), location: Some(Location { file: "/data/neptune-core/neptune-core/src/database/storage/storage_schema/dbtvec_private.rs", line: 136, col: 57 }) }
+//        |-- lock_event=Acquire { info: LockInfo { name: Some("RustyWalletDatabase-Schema"), lock_type: RwLock }, acquisition: Read, try_acquire_at: Some(Instant { tv_sec: 25730099, tv_nsec: 617232523 }), acquire_at: Some(Instant { tv_sec: 25730099, tv_nsec: 617348321 }), location: Some(Location { file: "/data/xnt-core/xnt-core/src/database/storage/storage_schema/dbtvec_private.rs", line: 136, col: 57 }) }
 
 foreach ($lines as $line) {
     if (strpos($line, "lock_event") === false) {
@@ -53,7 +53,7 @@ foreach ($locations as $location => $events) {
 }
 
 if (!count($locations)) {
-    die( "did not find any lock events. Was neptune-core compiled with --features log-lock_events?");
+    die( "did not find any lock events. Was xnt-core compiled with --features log-lock_events?");
 }
 
 echo "\n\n------------------\n\n";

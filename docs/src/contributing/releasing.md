@@ -36,7 +36,7 @@ An example of a fully automated step is assembly and distribution of binaries by
 Unless indicated otherwise, the current working directory is assumed to be the workspace root.
 
 ```sh
-cd /path/to/neptune-core
+cd /path/to/xnt-core
 ```
 
 ### Check Distribution Workflow Files

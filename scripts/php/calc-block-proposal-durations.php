@@ -2,14 +2,14 @@
 <?php
 
 
-// A simple script to parse a neptune-core log file and count how many times a
+// A simple script to parse a xnt-core log file and count how many times a
 // lock was acquired and released for each location (acquired)
 //
 // If a discrepancy is found between number of acquire and release, it is
 // reported.  This typically indicates a lock that is not being released and
 // thus is the cause of a hang/deadlock.
 //
-// note that neptune-core must be built with --features log-lock_events.  if
+// note that xnt-core must be built with --features log-lock_events.  if
 // not, it will not emit the necessary log messages.
 //
 
@@ -23,8 +23,8 @@ if (!$path) {
 }
 
 // sample lines:  (note: sometimes same event is received multiple times, eg from different peers)
-// 2025-02-15T16:07:36.052344541Z  INFO ThreadId(53) neptune_cash::peer_loop: Got new block from peer 51.158.203.7:9798, height 683, mined 2025-02-15T16:07:06.768+00:00
-// 2025-02-15T16:21:45.835421687Z  INFO ThreadId(55) neptune_cash::mine_loop: Miner received message about new block proposal for guessing.
+// 2025-02-15T16:07:36.052344541Z  INFO ThreadId(53) neptune_privacy::peer_loop: Got new block from peer 51.158.203.7:9798, height 683, mined 2025-02-15T16:07:06.768+00:00
+// 2025-02-15T16:21:45.835421687Z  INFO ThreadId(55) neptune_privacy::mine_loop: Miner received message about new block proposal for guessing.
 
 
 // $cmd = "cat '$path' | grep -e 'Miner received message about new block proposal' -e 'Got new block from peer'";

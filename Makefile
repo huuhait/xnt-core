@@ -1,6 +1,6 @@
 .PHONY: clean help stats bench all install run test build doc check format bench-no-run pretty-log
 
-prog :=neptune-core
+prog :=xnt-core
 
 # Set another target dir than default to avoid builds from `make`
 # to invalidate cache from barebones use of `cargo` commands.
@@ -20,7 +20,7 @@ build:
 
 doc:
 	cargo doc --no-deps
-	xdg-open "target/doc/neptune-core/index.html"
+	xdg-open "target/doc/xnt-core/index.html"
 
 check:
 	cargo check
@@ -38,12 +38,12 @@ happy: clippy format
 	cargo test --doc
 
 install:
-	cargo install --force --locked --path neptune-core/
-	cargo install --force --locked --path neptune-core-cli/
-	cargo install --force --locked --path neptune-dashboard/
+	cargo install --force --locked --path xnt-core/
+	cargo install --force --locked --path xnt-core-cli/
+	cargo install --force --locked --path xnt-dashboard/
 
 install-linux: install
-	@echo "\n\nPlease run:\n./scripts/linux/install-bash-completions.sh\nto install bash-completions for Neptune-core's CLI."
+	@echo "\n\nPlease run:\n./scripts/linux/install-bash-completions.sh\nto install bash-completions for xnt-core's CLI."
 
 clippy:
 	cargo clippy --all-targets -- -D warnings

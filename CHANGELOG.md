@@ -1,3 +1,15 @@
+## 0.1.0 - 2025-11-25
+
+### 🔱 Fork
+- (!) The birth of **xnt** — the beginning of the Neptune Privacy fork.
+
+### ✨ Features
+- Removed time-locked miner rewards.
+- Updated block emission schedule.
+- Faster block time, from ~10 minutes reduced to 5 minutes.
+- Reverted alphanet hardfork changes to stimulate faster composing.
+- Reduced mining algorithm memory requirements to allow older hardware to participate.
+
 
 ## [0.5.0](https://github.com/Neptune-Crypto/neptune-core/compare/v0.4.0..v0.5.0) - 2025-10-31
 

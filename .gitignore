@@ -8,12 +8,12 @@ target/
 /makefile-target-opt-level3
 
 # git shouldn't see the proof files, or block files. Bc big.
-/neptune-core/test_data/*.proof
-/neptune-core/test_data/blk*.dat
+/xnt-core/test_data/*.proof
+/xnt-core/test_data/blk*.dat
 
 # Remove Cargo.lock from gitignore if creating an executable, leave it for libraries
 # More information here https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html
-# Cargo.lock
+Cargo.lock
 
 # Developer local, custom repo settings
 .cargo/config.local.toml
@@ -126,3 +126,6 @@ fabric.properties
 # Debuggable Tasm programs for triton-tui
 program.tasm
 vm_state.json
+test_database/
+test_database2/
+test_database3/

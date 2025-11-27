@@ -1,6 +1,6 @@
 # Keys and Addresses
 
-`neptune-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present two types of keys are supported: `Generation` and `Symmetric`.
+`xnt-core` uses an extensible system of keys and addresses.  This is accomplished via an abstract type for each.  At present two types of keys are supported: `Generation` and `Symmetric`.
 
 ## Abstraction layer
 
@@ -23,13 +23,13 @@ At present all supported key types are based on the same secret `seed`. The end-
 
 ## Key derivation
 
-For each key-type, the neptune-core wallet keeps a counter which tracks the latest derived key.
+For each key-type, the xnt-core wallet keeps a counter which tracks the latest derived key.
 
 To obtain the next unused address for a given key type call the rpc method `next_receiving_address(key_type)`.
 
 (note: as of this writing it always returns the same address at index 0, but in the future it will work as described)
 
-An equivalent API for obtaining the next unused spending key is available in the neptune-core crate, but is not (yet?) exposed as an rpc API.
+An equivalent API for obtaining the next unused spending key is available in the xnt-core crate, but is not (yet?) exposed as an rpc API.
 
 
 ## Available key types

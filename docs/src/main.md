@@ -4,7 +4,7 @@ The documentation for Neptune is distributed across the following categories.
 
 {{#include consensus.md}}
 
-{{#include neptune-core.md}}
+{{#include xnt-core.md}}
 
 ## Triton VM
 

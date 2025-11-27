@@ -2,7 +2,7 @@
 
 ## Archival versus Succinct
 
-By default, `neptune-core` implements an *archival node*, which is one that stores all historical blocks as well as an archival mutator set and an archival block MMR. Besides *storing* historical data, the archival node supports additional functionalities such as being able to reconstruct transaction membership proofs, provide historical statistics, and enabling other (archival) nodes to synchronize.
+By default, `xnt-core` implements an *archival node*, which is one that stores all historical blocks as well as an archival mutator set and an archival block MMR. Besides *storing* historical data, the archival node supports additional functionalities such as being able to reconstruct transaction membership proofs, provide historical statistics, and enabling other (archival) nodes to synchronize.
 
 In the future we intend to achieve [*succinctness*](../consensus/succinctness.md) through *recursive block validation*. At this point, users can synchronize trustlessly simply by downloading the latest block and verifying it. Storing historical data will be optional.
 

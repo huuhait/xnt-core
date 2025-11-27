@@ -34,10 +34,10 @@ The benefit of using announcements to transmit this information is that the bloc
 
 All generation addresses are deterministically generated from the wallet secret seed and a derivation index. The derivation index is initially set to 0 and increases by one each time a new address is generated. This construction ensures that if the wallet file should be lost, the exact same sequence of generation addresses can be reproduced from the backed-up seed phrase.
 
-## Using `neptune-dashboard`
+## Using `xnt-dashboard`
 
- - Make sure a node is running: `> neptune-core`.
- - Start `neptune-dashboard` in a new console window `> neptune-dashboard`.
+ - Make sure a node is running: `> xnt-core`.
+ - Start `xnt-dashboard` in a new console window `> xnt-dashboard`.
  - Navigate to the "Receive" tab. Your current generation address is shown.
  - Press `Enter` to generate a new generation address.
  - Press `C` to enter into *console mode*, where you can copy the address.
@@ -48,7 +48,7 @@ All generation addresses are deterministically generated from the wallet secret 
 ### Next Address
 
 To generate the *next* generation address without going through the dashboard, `neptune-cli` is your friend:
- - Make sure a node is running: `> neptune-core`.
+ - Make sure a node is running: `> xnt-core`.
  - `> neptune-cli next-generation-address`.
 
 ## Nth Address

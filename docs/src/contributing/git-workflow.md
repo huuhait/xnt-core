@@ -83,7 +83,7 @@ For all but the most trivial changes, please provide some additional lines with 
 A git template for assisting with creation of conventional commit messages can be found in the [Git Message](git-message.md). This template can be added globally to git with this command:
 
 ```
-git config --global commit.template /path/to/neptune-core/docs/src/contributing/.gitmessage
+git config --global commit.template /path/to/xnt-core/docs/src/contributing/.gitmessage
 ```
 
 It can also be added on a per-repository basis by omitting the `--global` flag.
@@ -92,7 +92,7 @@ It can also be added on a per-repository basis by omitting the `--global` flag.
 
 ### For published crate releases
 
-When publishing a crate, and/or when making a release of `neptune-core`, all dependencies should/must reference a version published to [crates.io](https://crates.io).
+When publishing a crate, and/or when making a release of `xnt-core`, all dependencies should/must reference a version published to [crates.io](https://crates.io).
 
 In particular, git repo references must not be used.
 
