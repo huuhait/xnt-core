@@ -5,7 +5,18 @@ use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
+use crate::api::export::{BlockHeight, NativeCurrencyAmount, TxInput};
+use crate::api::tx_initiation::builder::tx_input_list_builder::SortOrder;
+use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
+use crate::api::tx_initiation::send::TransactionSender;
+use crate::api::wallet::Wallet;
 use crate::application::json_rpc::core::api::rpc::*;
+
+use crate::application::json_rpc::core::api::rpc::RpcError;
+use crate::application::json_rpc::core::model::json::JsonError;
+
+use crate::application::json_rpc::core::api::rpc::RpcApi;
+use crate::application::json_rpc::core::api::rpc::RpcResult;
 use crate::application::json_rpc::core::model::block::RpcBlock;
 use crate::application::json_rpc::core::model::message::*;
 use crate::application::json_rpc::core::model::mining::template::RpcBlockTemplate;
@@ -16,6 +27,12 @@ use crate::application::loops::channel::RPCServerToMain;
 use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
+
+use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::state::wallet::address::KeyType;
+use crate::state::wallet::change_policy::ChangePolicy;
+use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
+use tasm_lib::prelude::Digest;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -593,6 +610,540 @@ impl RpcApi for RpcServer {
             }),
         })
     }
+    async fn generate_address_call(
+        &self,
+        _request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse> {
+        let network = self.state.cli().network;
+
+        let mut wallet = Wallet::from(self.state.clone());
+
+        let receiving_address = wallet
+            .next_receiving_address(KeyType::Generation)
+            .await
+            .map_err(|e| {
+                RpcError::Server(JsonError::Custom {
+                    code: -32000,
+                    message: format!("Failed to generate address: {}", e),
+                    data: None,
+                })
+            })?;
+
+        let address_string = receiving_address.to_bech32m(network).map_err(|e| {
+            RpcError::Server(JsonError::Custom {
+                code: -32000,
+                message: format!("Failed to encode address: {}", e),
+                data: None,
+            })
+        })?;
+
+        Ok(GenerateAddressResponse {
+            address: address_string,
+        })
+    }
+
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        let state = self.state.lock_guard().await;
+
+        let Some(digest) = request.block.as_digest(&state).await else {
+            return Ok(CountSentTransactionsAtBlockResponse { count: 0 });
+        };
+
+        let count = state
+            .wallet_state
+            .count_sent_transactions_at_block(digest)
+            .await;
+
+        Ok(CountSentTransactionsAtBlockResponse { count })
+    }
+
+    async fn get_balance_call(&self, _request: GetBalanceRequest) -> RpcResult<GetBalanceResponse> {
+        let state = self.state.lock_guard().await;
+        let wallet_status = state.get_wallet_status_for_tip().await;
+
+        let confirmed_available = wallet_status.available_confirmed(Timestamp::now());
+
+        Ok(GetBalanceResponse {
+            balance: confirmed_available.to_string(),
+        })
+    }
+
+    async fn history_call(&self, request: HistoryRequest) -> RpcResult<HistoryResponse> {
+        let state = self.state.lock_guard().await;
+        let network = self.state.cli().network;
+
+        let query_lock_script_hash: Option<Digest> =
+            if let Some(ref receiving_address_str) = request.receiving_address {
+                ReceivingAddress::from_bech32m(receiving_address_str, network)
+                    .ok()
+                    .map(|addr| addr.lock_script_hash())
+            } else {
+                None
+            };
+
+        let history = state
+            .get_balance_history_query(
+                request.leaf_index,
+                request.utxo_digest,
+                query_lock_script_hash,
+                request.sender_randomness,
+                request.confirmed_height,
+                request.spent_height,
+            )
+            .await;
+
+        let futures = history
+            .iter()
+            .map(|(i, ud, sr, h, t, bh, sh, utxo)| async {
+                let lock_script_hash = utxo.lock_script_hash();
+
+                let address = state
+                    .wallet_state
+                    .get_all_known_addressable_spending_keys()
+                    .find(|k| k.lock_script_hash() == lock_script_hash)
+                    .map(|key| key.to_address());
+
+                (*i, *ud, *sr, *h, *bh, *sh, *t, address, utxo.clone())
+            })
+            .collect::<Vec<_>>();
+
+        let display_history: Vec<(
+            u64,
+            Option<Digest>,
+            Digest,
+            Digest,
+            BlockHeight,
+            Option<BlockHeight>,
+            Timestamp,
+            Option<ReceivingAddress>,
+            Utxo,
+        )> = futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let history_rows = display_history
+            .iter()
+            .map(
+                |(
+                    leaf_index,
+                    utxo_digest,
+                    sender_randomness,
+                    digest,
+                    confirmed_height,
+                    spent_height,
+                    timestamp,
+                    receiving_address,
+                    utxo,
+                )| {
+                    let receiving_address_str: Option<String>;
+
+                    if let Some(ref receiving_address) = *receiving_address {
+                        receiving_address_str = Some(
+                            receiving_address
+                                .to_bech32m(network)
+                                .expect("valid address"),
+                        );
+                    } else {
+                        receiving_address_str = None;
+                    }
+
+                    History {
+                        leaf_index: *leaf_index,
+                        utxo_digest: *utxo_digest,
+                        sender_randomness: *sender_randomness,
+                        digest: *digest,
+                        confirmed_height: *confirmed_height,
+                        spent_height: *spent_height,
+                        timestamp: *timestamp,
+                        receiving_address: receiving_address_str,
+                        utxo: ApiUtxo::new(utxo),
+                    }
+                },
+            )
+            .collect();
+
+        Ok(history_rows)
+    }
+
+    async fn sent_transaction_call(
+        &self,
+        request: SentTransactionRequest,
+    ) -> RpcResult<SentTransactionResponse> {
+        let state = self.state.lock_guard().await;
+
+        let sent_transactions = state
+            .get_sent_transactions(
+                request.sender_randomness,
+                request.receiver_digest,
+                request.lock_script_hash,
+                request.limit,
+                request.page,
+            )
+            .await;
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+
+        let mut sent_txs = Vec::new();
+        for tx in sent_transactions {
+            let out_utxos = tx.tx_outputs.utxos();
+            let out_sender_randomness = tx.tx_outputs.sender_randomnesses();
+            let out_receiver_digest = tx.tx_outputs.receiver_digests();
+
+            let mut tx_outputs = Vec::new();
+            for (index, utxo) in out_utxos.iter().enumerate() {
+                tx_outputs.push(SentTxOutput {
+                    utxo: ApiUtxo::new(utxo),
+                    sender_randomness: out_sender_randomness[index],
+                    receiver_digest: out_receiver_digest[index],
+                });
+            }
+
+            let mut tx_inputs = Vec::new();
+            for (leaf_index, input_utxo) in &tx.tx_inputs {
+                let utxo_digest = if *leaf_index > 0 && *leaf_index < num_leafs {
+                    Some(aocl.get_leaf_async(*leaf_index).await)
+                } else {
+                    None
+                };
+
+                tx_inputs.push(SentTxInput {
+                    leaf_index: *leaf_index,
+                    utxo_digest,
+                    utxo: ApiUtxo::new(input_utxo),
+                });
+            }
+
+            sent_txs.push(SentTxToRespResponse {
+                tx_inputs,
+                tx_outputs,
+                fee: tx.fee.to_string(),
+                timestamp: tx.timestamp,
+                tip_when_sent: tx.tip_when_sent,
+            });
+        }
+        Ok(sent_txs)
+    }
+
+    async fn sent_transaction_by_sender_randomness_call(
+        &self,
+        request: SentTransactionBySenderRandomnessRequest,
+    ) -> RpcResult<SentTransactionBySenderRandomnessResponse> {
+        let state = self.state.lock_guard().await;
+
+        let sent_transactions = state
+            .get_sent_transactions(Some(request.sender_randomness), None, None, None, None)
+            .await;
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+
+        for tx in sent_transactions {
+            if tx.timestamp != request.timestamp {
+                continue;
+            }
+
+            let sender_randomnesses = tx.tx_outputs.sender_randomnesses();
+            if !sender_randomnesses.contains(&request.sender_randomness) {
+                continue;
+            }
+
+            let out_utxos = tx.tx_outputs.utxos();
+            let out_receiver_digest = tx.tx_outputs.receiver_digests();
+
+            let mut tx_outputs = Vec::new();
+            for (index, utxo) in out_utxos.iter().enumerate() {
+                tx_outputs.push(SentTxOutput {
+                    utxo: ApiUtxo::new(utxo),
+                    sender_randomness: sender_randomnesses[index],
+                    receiver_digest: out_receiver_digest[index],
+                });
+            }
+
+            let mut tx_inputs = Vec::new();
+            for (index, input_utxo) in &tx.tx_inputs {
+                let utxo_digest = if *index > 0 && *index < num_leafs {
+                    Some(aocl.get_leaf_async(*index).await)
+                } else {
+                    None
+                };
+
+                tx_inputs.push(SentTxInput {
+                    leaf_index: *index,
+                    utxo_digest,
+                    utxo: ApiUtxo::new(input_utxo),
+                });
+            }
+
+            return Ok(Some(SentTxToRespResponse {
+                tx_inputs,
+                tx_outputs,
+                fee: tx.fee.to_string(),
+                timestamp: tx.timestamp,
+                tip_when_sent: tx.tip_when_sent,
+            }));
+        }
+
+        Ok(None)
+    }
+
+    async fn validate_amount_call(
+        &self,
+        request: ValidateAmountRequest,
+    ) -> RpcResult<ValidateAmountResponse> {
+        let amount = NativeCurrencyAmount::coins_from_str(&request.amount_string)
+            .ok()
+            .map(|amt| amt.to_string());
+
+        Ok(ValidateAmountResponse { amount })
+    }
+
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse> {
+        let network = self.state.cli().network;
+
+        let ret = ReceivingAddress::from_bech32m(&request.address_string, network).ok();
+
+        let address = ret.and_then(|addr| addr.to_bech32m(network).ok());
+
+        Ok(ValidateAddressResponse { address })
+    }
+
+    async fn send_tx_call(&self, request: SendTxRequest) -> RpcResult<SendTxResponse> {
+        let Ok(valid_amount) = NativeCurrencyAmount::coins_from_str(&request.amount) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid amount format".to_string(),
+                data: None,
+            }));
+        };
+
+        let Ok(valid_fee) = NativeCurrencyAmount::coins_from_str(&request.fee) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid fee format".to_string(),
+                data: None,
+            }));
+        };
+
+        let network = self.state.cli().network;
+        let Ok(to_address) = ReceivingAddress::from_bech32m(&request.to_address, network) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid address format".to_string(),
+                data: None,
+            }));
+        };
+
+        let outputs: Vec<OutputFormat> = vec![OutputFormat::AddressAndAmountAndMedium(
+            to_address,
+            valid_amount,
+            UtxoNotificationMedium::OnChain,
+        )];
+
+        let change_policy = ChangePolicy::RecoverToNextUnusedKey {
+            key_type: KeyType::Generation,
+            medium: UtxoNotificationMedium::OnChain,
+        };
+
+        let mut tx_sender = TransactionSender::from(self.state.clone());
+        let resp = tx_sender
+            .send(
+                outputs,
+                change_policy,
+                valid_fee,
+                Timestamp::now(),
+                request.exclude_recent_blocks,
+            )
+            .await
+            .map_err(|e| {
+                RpcError::Server(JsonError::Custom {
+                    code: -32000,
+                    message: format!("Failed to send transaction: {}", e),
+                    data: None,
+                })
+            })?;
+
+        let id = resp.transaction().txid();
+
+        let timestamp = resp.details().timestamp;
+
+        let notification_list: Vec<SendTxNotificationData> = resp
+            .details()
+            .tx_outputs
+            .iter()
+            .filter(|output| !output.is_change())
+            .map(|output| SendTxNotificationData {
+                utxo: SendTxNotificationUtxo {
+                    lock_script_hash: output.utxo().lock_script_hash(),
+                    amount: output.utxo().get_native_currency_amount().to_string(),
+                },
+                sender_randomness: output.sender_randomness(),
+            })
+            .collect();
+
+        Ok(SendTxResponse {
+            id,
+            timestamp,
+            notification_data: notification_list,
+        })
+    }
+
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse> {
+        use crate::api::tx_initiation::initiator::TransactionInitiator;
+
+        let tx_initiator = TransactionInitiator::from(self.state.clone());
+        let spendable_inputs = tx_initiator
+            .spendable_inputs(Timestamp::now(), request.exclude_recent_blocks)
+            .await;
+
+        let utxos: Vec<UnspentUtxo> = spendable_inputs
+            .iter()
+            .map(|input| UnspentUtxo {
+                leaf_index: input.mutator_set_mp().aocl_leaf_index,
+                lock_script_hash: input.utxo.lock_script_hash(),
+                amount: input.native_currency_amount().to_string(),
+            })
+            .collect();
+
+        Ok(utxos)
+    }
+
+    async fn select_spendable_inputs_call(
+        &self,
+        request: SelectSpendableInputsRequest,
+    ) -> RpcResult<SelectSpendableInputsResponse> {
+        use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPolicy;
+        use crate::api::tx_initiation::initiator::TransactionInitiator;
+
+        let Ok(amount) = NativeCurrencyAmount::coins_from_str(&request.amount) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid amount format".to_string(),
+                data: None,
+            }));
+        };
+
+        let Ok(fee) = NativeCurrencyAmount::coins_from_str(&request.fee) else {
+            return Err(RpcError::Server(JsonError::Custom {
+                code: -32602,
+                message: "Invalid fee format".to_string(),
+                data: None,
+            }));
+        };
+
+        let target_amount = amount + fee;
+
+        let tx_initiator = TransactionInitiator::from(self.state.clone());
+        let selected_inputs: Vec<TxInput> = tx_initiator
+            .select_spendable_inputs(
+                InputSelectionPolicy::ByNativeCoinAmount(SortOrder::Ascending),
+                target_amount,
+                Timestamp::now(),
+                request.exclude_recent_blocks,
+            )
+            .await
+            .into_iter()
+            .collect();
+
+        let total_selected_amount: NativeCurrencyAmount = selected_inputs
+            .iter()
+            .map(|input| input.utxo.get_native_currency_amount())
+            .sum();
+
+        let selected_utxos: Vec<UnspentUtxo> = selected_inputs
+            .into_iter()
+            .map(|input| UnspentUtxo {
+                leaf_index: input.mutator_set_mp().aocl_leaf_index,
+                lock_script_hash: input.utxo.lock_script_hash(),
+                amount: input.utxo.get_native_currency_amount().to_string(),
+            })
+            .collect();
+
+        Ok(SelectSpendableInputsResponse {
+            selected_utxos,
+            total_selected_amount: total_selected_amount.to_string(),
+        })
+    }
+
+    async fn block_api_call(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse> {
+        let state = self.state.lock_guard().await;
+        let network = self.state.cli().network;
+
+        let Some(digest) = request.selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let archival_state = state.chain.archival_state();
+
+        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
+            return Ok(None);
+        };
+
+        let header = block.header();
+        let body = block.body();
+        let digest = block.hash();
+        let transaction_kernel = body.transaction_kernel.clone();
+
+        let inputs = state
+            .wallet_state
+            .scan_for_spent_utxos(&transaction_kernel)
+            .await;
+
+        let mut transaction_inputs = Vec::with_capacity(inputs.len());
+        for (_, (utxo, _)) in inputs {
+            let address = state
+                .wallet_state
+                .find_spending_key_for_utxo(&utxo)
+                .map(|key| key.to_address().to_bech32m(network))
+                .and_then(|result| result.ok());
+
+            transaction_inputs.push(InputUtxo {
+                utxo: ApiUtxo::new(&utxo),
+                receiving_address: address,
+            });
+        }
+
+        let outputs: Vec<OutputUtxo> = state
+            .wallet_state
+            .scan_for_utxos_announced_to_known_keys(&transaction_kernel)
+            .map(|incoming_utxo| {
+                let address = state
+                    .wallet_state
+                    .find_spending_key_for_utxo(&incoming_utxo.utxo)
+                    .map(|key| key.to_address().to_bech32m(network))
+                    .and_then(|result| result.ok());
+
+                OutputUtxo {
+                    sender_randomness: incoming_utxo.sender_randomness,
+                    receiver_preimage: incoming_utxo.receiver_preimage,
+                    receiving_address: address,
+                    utxo: ApiUtxo::new(&incoming_utxo.utxo),
+                }
+            })
+            .collect();
+
+        Ok(Some(BlockApiData {
+            height: header.height,
+            digest,
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            size: block.size(),
+            fee: transaction_kernel.fee.to_string(),
+            transaction_kernel_id: transaction_kernel.txid(),
+            inputs: transaction_inputs,
+            outputs,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -918,6 +1469,7 @@ pub mod tests {
                 Default::default(),
                 mock_amount,
                 network.launch_date() + Timestamp::months(3),
+                0,
             )
             .await
             .unwrap();

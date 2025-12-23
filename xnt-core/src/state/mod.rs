@@ -50,6 +50,7 @@ use wallet::wallet_status::WalletStatus;
 
 use crate::api;
 use crate::api::export::NeptuneProof;
+use crate::api::export::Utxo;
 use crate::application::config::cli_args;
 use crate::application::config::data_directory::DataDirectory;
 use crate::application::config::tx_upgrade_filter::TxUpgradeFilter;
@@ -1057,21 +1058,242 @@ impl GlobalState {
         history
     }
 
+    pub async fn get_balance_history_query(
+        &self,
+        query_leaf_index: Option<u64>,
+        query_utxo_digest: Option<Digest>,
+        query_lock_script_hash: Option<Digest>,
+        query_sender_randomness: Option<Digest>,
+        query_confirmed_block_height: Option<BlockHeight>,
+        query_spent_block_height: Option<BlockHeight>,
+    ) -> Vec<(
+        u64,
+        Option<Digest>,
+        Digest,
+        Digest,
+        Timestamp,
+        BlockHeight,
+        Option<BlockHeight>,
+        Utxo,
+    )> {
+        let current_tip_digest = self.chain.light_state().hash();
+        let aocl = &self.chain.archival_state().archival_mutator_set.ams().aocl;
+        let current_msa = self
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("block from state must have mutator set after");
+
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
+
+        let mut history = vec![];
+
+        let stream = monitored_utxos.stream_values().await;
+        pin_mut!(stream);
+        while let Some(monitored_utxo) = stream.next().await {
+            let Some(msmp) = monitored_utxo.membership_proof_ref_for_block(current_tip_digest)
+            else {
+                continue;
+            };
+
+            let lock_script_hash = monitored_utxo.utxo.lock_script_hash();
+            let aocl_index: u64 = monitored_utxo.aocl_leaf_index;
+
+            let utxo_digest = match aocl_index > 0 && aocl_index < aocl.num_leafs().await {
+                true => Some(aocl.get_leaf_async(aocl_index).await),
+                false => None,
+            };
+
+            if let Some(query_leaf_index) = query_leaf_index {
+                if aocl_index != query_leaf_index {
+                    continue;
+                }
+            }
+
+            if let Some(query_utxo_digest) = query_utxo_digest {
+                if let Some(actual_digest) = utxo_digest {
+                    if actual_digest != query_utxo_digest {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
+            if let Some(query_lock_script_hash) = query_lock_script_hash {
+                if lock_script_hash != query_lock_script_hash {
+                    continue;
+                }
+            }
+
+            if let Some(query_sender_randomness) = query_sender_randomness {
+                if msmp.sender_randomness != query_sender_randomness {
+                    continue;
+                }
+            }
+
+            let (confirming_block, confirmation_timestamp, confirmation_height) =
+                monitored_utxo.confirmed_in_block;
+
+            if let Some(query_confirmed_block_height) = query_confirmed_block_height {
+                if query_confirmed_block_height != confirmation_height {
+                    continue;
+                }
+            }
+
+            let spent_height = if let Some((_, _, spending_height)) = monitored_utxo.spent_in_block
+            {
+                let actually_spent = !current_msa.verify(Tip5::hash(&monitored_utxo.utxo), msmp);
+                if actually_spent {
+                    Some(spending_height)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(query_spent_block_height) = query_spent_block_height {
+                if spent_height != Some(query_spent_block_height) {
+                    continue;
+                }
+            }
+
+            history.push((
+                aocl_index,
+                utxo_digest,
+                msmp.sender_randomness,
+                confirming_block,
+                confirmation_timestamp,
+                confirmation_height,
+                spent_height,
+                monitored_utxo.utxo,
+            ));
+        }
+
+        history
+    }
+
+    pub async fn get_sent_transactions(
+        &self,
+        query_sender_randomness: Option<Digest>,
+        query_receiver_digest: Option<Digest>,
+        query_lock_script_hash: Option<Digest>,
+        limit: Option<u64>,
+        page: Option<u64>,
+    ) -> Vec<SentTransaction> {
+        let send_txs = self.wallet_state.wallet_db.sent_transactions();
+
+        let mut send_transactions = vec![];
+
+        // iterate over list in reverse order (newest blocks first)
+        let stream = send_txs.stream_values().await;
+        pin_mut!(stream); // needed for iteration
+
+        // note; this loop assumes that SentTransaction are ordered such
+        // that any elements with the same tip_when_sent (digest) are next
+        // to eachother, which should normally be true.
+        // that assumption allows us to break early rather than checking the
+        // entire list.
+
+        let mut count = 0;
+
+        while let Some(send_tx) = stream.next().await {
+            let sender_randomness = send_tx.tx_outputs.sender_randomnesses();
+            let receiver_digest = send_tx.tx_outputs.receiver_digests();
+            let utxos = send_tx.tx_outputs.utxos();
+
+            if let Some(query_sender_randomness) = query_sender_randomness {
+                if !sender_randomness.contains(&query_sender_randomness) {
+                    continue;
+                }
+            }
+
+            if let Some(query_receiver_digest) = query_receiver_digest {
+                if !receiver_digest.contains(&query_receiver_digest) {
+                    continue;
+                }
+            }
+
+            if let Some(query_lock_script_hash) = query_lock_script_hash {
+                if !utxos
+                    .iter()
+                    .any(|utxo| utxo.lock_script_hash() == query_lock_script_hash)
+                {
+                    continue;
+                }
+            }
+
+            count += 1;
+
+            if let Some(limit) = limit {
+                if count > limit {
+                    break;
+                }
+            }
+
+            if let Some(page) = page {
+                if count <= (page - 1) * limit.unwrap_or(1) {
+                    continue;
+                }
+            }
+
+            send_transactions.push(send_tx);
+        }
+
+        send_transactions
+    }
+
+    /// Returns the digests of the last `count` blocks (including current tip).
+    ///
+    /// Used to determine which sent transactions are still "recent" and should
+    /// have their UTXOs blocked from spending.
+    async fn get_recent_tips(&self, count: usize) -> HashSet<Digest> {
+        let mut tips = HashSet::new();
+        let mut current_digest = self.chain.light_state().hash();
+
+        for _ in 0..count {
+            tips.insert(current_digest);
+
+            // Try to get parent block
+            let Ok(Some(block)) = self.chain.archival_state().get_block(current_digest).await
+            else {
+                break;
+            };
+
+            current_digest = block.header().prev_block_digest;
+
+            // Stop at genesis (prev_block_digest points to itself)
+            if current_digest == block.hash() {
+                break;
+            }
+        }
+
+        tips
+    }
+
     /// retrieves all spendable inputs in the wallet as of the present tip.
     ///
     /// excludes utxos:
     ///   + that are timelocked in the future
     ///   + that are unspendable (no spending key)
     ///   + that are already spent in the mempool
+    ///   + that are already spent in sent transactions (within last `recent_tips_count` blocks)
     ///
     /// note: ordering of the returned `TxInput` is insertion order into the
     /// wallet.
     pub async fn wallet_spendable_inputs(
         &self,
         timestamp: Timestamp,
-    ) -> impl IntoIterator<Item = TxInput> + use<'_> {
+        exclude_recent_blocks: usize,
+    ) -> impl IntoIterator<Item = TxInput> {
         let wallet_status = self.get_wallet_status_for_tip().await;
-        self.wallet_state.spendable_inputs(wallet_status, timestamp)
+        let recent_tips = self.get_recent_tips(exclude_recent_blocks).await;
+        self.wallet_state
+            .spendable_inputs(wallet_status, timestamp, &recent_tips)
+            .await
+            .into_iter()
+            .collect::<Vec<_>>()
     }
 
     pub(crate) fn get_own_handshakedata(&self) -> HandshakeData {
@@ -2594,7 +2816,7 @@ mod tests {
             let inputs = sender
                 .api()
                 .tx_initiator()
-                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp)
+                .select_spendable_inputs(InputSelectionPolicy::ByProvidedOrder, amount, timestamp, 3)
                 .await
                 .into_iter()
                 .collect_vec();

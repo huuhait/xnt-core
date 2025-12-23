@@ -1,8 +1,9 @@
-use xnt_rpc_macros::Router;
-use xnt_rpc_macros::Routes;
 use serde::Deserialize;
 use serde::Serialize;
 use strum::EnumString;
+
+use xnt_rpc_macros::Router;
+use xnt_rpc_macros::Routes;
 
 use crate::application::json_rpc::core::api::client::transport::Transport;
 use crate::application::json_rpc::core::api::rpc::RpcApi;
@@ -119,6 +120,41 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mempool)]
     GetTransactionProof,
+    #[namespace(Namespace::Wallet)]
+    GenerateAddress,
+
+    #[namespace(Namespace::Wallet)]
+    CountSentTransactionsAtBlock,
+
+    #[namespace(Namespace::Wallet)]
+    GetBalance,
+
+    #[namespace(Namespace::Wallet)]
+    History,
+
+    #[namespace(Namespace::Wallet)]
+    SentTransaction,
+
+    #[namespace(Namespace::Wallet)]
+    SentTransactionBySenderRandomness,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateAmount,
+
+    #[namespace(Namespace::Wallet)]
+    ValidateAddress,
+
+    #[namespace(Namespace::Wallet)]
+    SendTx,
+
+    #[namespace(Namespace::Wallet)]
+    UnspentUtxos,
+
+    #[namespace(Namespace::Wallet)]
+    SelectSpendableInputs,
+
+    #[namespace(Namespace::Wallet)]
+    BlockApi,
 }
 
 #[cfg(test)]

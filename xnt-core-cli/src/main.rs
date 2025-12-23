@@ -254,6 +254,8 @@ enum Command {
         receiver_tag: String,
         notify_self: UtxoNotificationMedium,
         notify_other: UtxoNotificationMedium,
+
+        exclude_recent_blocks: usize,
     },
 
     /// send a payment with time locked coins to a single recipient
@@ -269,7 +271,9 @@ enum Command {
         #[clap(value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
 
-        release_after_seconds: u64
+        release_after_seconds: u64,
+
+        exclude_recent_blocks: usize,
     },
 
     /// send a payment to one or more recipients
@@ -281,6 +285,8 @@ enum Command {
         outputs: Vec<Beneficiary>,
         #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
+
+        exclude_recent_blocks: usize,
     },
 
     /// Like `SendToMany` but the resulting transaction will be *transparent*.
@@ -299,6 +305,8 @@ enum Command {
         outputs: Vec<Beneficiary>,
         #[clap(long, value_parser = NativeCurrencyAmount::coins_from_str)]
         fee: NativeCurrencyAmount,
+
+        exclude_recent_blocks: usize,
     },
 
     /// Upgrade the specified transaction. Transaction must be either unsynced
@@ -1120,6 +1128,7 @@ async fn main() -> Result<()> {
             receiver_tag,
             notify_self,
             notify_other,
+            exclude_recent_blocks,
         } => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
@@ -1141,6 +1150,7 @@ async fn main() -> Result<()> {
                     )],
                     ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, notify_self),
                     fee,
+                    exclude_recent_blocks,
                 )
                 .await?;
             let tx_artifacts = match resp {
@@ -1167,7 +1177,8 @@ async fn main() -> Result<()> {
             address,
             amount,
             fee,
-            release_after_seconds
+            release_after_seconds,
+            exclude_recent_blocks,
         } => {
             // Parse on client
             let receiver_tag = String::from_str("").unwrap();
@@ -1177,7 +1188,7 @@ async fn main() -> Result<()> {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-            let release_time = now + (release_after_seconds as u128) * 1000;
+            let release_time = now + u128::from(release_after_seconds) * 1000;
             let release_timestamp = Timestamp(BFieldElement::new(release_time as u64));
 
             // abort early on negative fee
@@ -1195,8 +1206,12 @@ async fn main() -> Result<()> {
                         amount,
                         release_timestamp,
                     )],
-                    ChangePolicy::recover_to_next_unused_key(KeyType::Symmetric, UtxoNotificationMedium::OnChain),
+                    ChangePolicy::recover_to_next_unused_key(
+                        KeyType::Symmetric,
+                        UtxoNotificationMedium::OnChain,
+                    ),
                     fee,
+                    exclude_recent_blocks,
                 )
                 .await?;
             let tx_artifacts = match resp {
@@ -1219,7 +1234,12 @@ async fn main() -> Result<()> {
                 Some(receiver_tag),
             )?
         }
-        Command::SendToMany { file, outputs, fee } => {
+        Command::SendToMany {
+            file,
+            outputs,
+            fee,
+            exclude_recent_blocks,
+        } => {
             let parsed_outputs = if let Some(filename) = file {
                 if !outputs.is_empty() {
                     bail!("specify raw outputs or a file to read them from but not both");
@@ -1255,6 +1275,7 @@ async fn main() -> Result<()> {
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
+                    exclude_recent_blocks,
                 )
                 .await?;
             match res {
@@ -1274,7 +1295,12 @@ async fn main() -> Result<()> {
                 Err(e) => eprintln!("{e}"),
             }
         }
-        Command::SendTransparent { file, outputs, fee } => {
+        Command::SendTransparent {
+            file,
+            outputs,
+            fee,
+            exclude_recent_blocks,
+        } => {
             let parsed_outputs = if let Some(filename) = file {
                 if !outputs.is_empty() {
                     bail!("specify raw outputs or a file to read them from but not both");
@@ -1309,6 +1335,7 @@ async fn main() -> Result<()> {
                         UtxoNotificationMedium::OnChain,
                     ),
                     fee,
+                    exclude_recent_blocks,
                 )
                 .await?;
             match res {

@@ -370,4 +370,107 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: GetTransactionProofRequest,
     ) -> RpcResult<GetTransactionProofResponse>;
+    async fn generate_address(&self) -> RpcResult<GenerateAddressResponse> {
+        self.generate_address_call(GenerateAddressRequest {}).await
+    }
+    async fn generate_address_call(
+        &self,
+        request: GenerateAddressRequest,
+    ) -> RpcResult<GenerateAddressResponse>;
+
+    async fn count_sent_transactions_at_block(
+        &self,
+        block: RpcBlockSelector,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse> {
+        self.count_sent_transactions_at_block_call(CountSentTransactionsAtBlockRequest { block })
+            .await
+    }
+    async fn count_sent_transactions_at_block_call(
+        &self,
+        request: CountSentTransactionsAtBlockRequest,
+    ) -> RpcResult<CountSentTransactionsAtBlockResponse>;
+
+    async fn get_balance(&self) -> RpcResult<GetBalanceResponse> {
+        self.get_balance_call(GetBalanceRequest {}).await
+    }
+    async fn get_balance_call(&self, request: GetBalanceRequest) -> RpcResult<GetBalanceResponse>;
+
+    async fn history(&self, request: HistoryRequest) -> RpcResult<HistoryResponse> {
+        self.history_call(request).await
+    }
+    async fn history_call(&self, request: HistoryRequest) -> RpcResult<HistoryResponse>;
+
+    async fn sent_transaction(
+        &self,
+        request: SentTransactionRequest,
+    ) -> RpcResult<SentTransactionResponse> {
+        self.sent_transaction_call(request).await
+    }
+    async fn sent_transaction_call(
+        &self,
+        request: SentTransactionRequest,
+    ) -> RpcResult<SentTransactionResponse>;
+
+    async fn sent_transaction_by_sender_randomness(
+        &self,
+        request: SentTransactionBySenderRandomnessRequest,
+    ) -> RpcResult<SentTransactionBySenderRandomnessResponse> {
+        self.sent_transaction_by_sender_randomness_call(request)
+            .await
+    }
+    async fn sent_transaction_by_sender_randomness_call(
+        &self,
+        request: SentTransactionBySenderRandomnessRequest,
+    ) -> RpcResult<SentTransactionBySenderRandomnessResponse>;
+
+    async fn validate_amount(
+        &self,
+        request: ValidateAmountRequest,
+    ) -> RpcResult<ValidateAmountResponse> {
+        self.validate_amount_call(request).await
+    }
+    async fn validate_amount_call(
+        &self,
+        request: ValidateAmountRequest,
+    ) -> RpcResult<ValidateAmountResponse>;
+
+    async fn validate_address(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse> {
+        self.validate_address_call(request).await
+    }
+    async fn validate_address_call(
+        &self,
+        request: ValidateAddressRequest,
+    ) -> RpcResult<ValidateAddressResponse>;
+
+    async fn send_tx(&self, request: SendTxRequest) -> RpcResult<SendTxResponse> {
+        self.send_tx_call(request).await
+    }
+    async fn send_tx_call(&self, request: SendTxRequest) -> RpcResult<SendTxResponse>;
+
+    async fn unspent_utxos(&self, request: UnspentUtxosRequest) -> RpcResult<UnspentUtxosResponse> {
+        self.unspent_utxos_call(request).await
+    }
+    async fn unspent_utxos_call(
+        &self,
+        request: UnspentUtxosRequest,
+    ) -> RpcResult<UnspentUtxosResponse>;
+
+    async fn select_spendable_inputs(
+        &self,
+        request: SelectSpendableInputsRequest,
+    ) -> RpcResult<SelectSpendableInputsResponse> {
+        self.select_spendable_inputs_call(request).await
+    }
+    async fn select_spendable_inputs_call(
+        &self,
+        request: SelectSpendableInputsRequest,
+    ) -> RpcResult<SelectSpendableInputsResponse>;
+
+    async fn block_api(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse> {
+        self.block_api_call(request).await
+    }
+    async fn block_api_call(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse>;
 }
