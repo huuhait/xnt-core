@@ -268,13 +268,9 @@ pub struct FindUtxoLeafIndexRequest {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FindUtxoLeafIndexResponse {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub leaf_index: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mempool: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool: bool,
     pub block_height: Option<BlockHeight>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub block_digest: Option<Digest>,
 }
 

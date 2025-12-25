@@ -363,7 +363,7 @@ impl RpcApi for RpcServer {
         if in_mempool {
             return Ok(FindUtxoLeafIndexResponse {
                 leaf_index: None,
-                mempool: Some(true),
+                mempool: true,
                 block_height: None,
                 block_digest: None,
             });
@@ -387,13 +387,13 @@ impl RpcApi for RpcServer {
         {
             Some((leaf_index, block_height, block_digest)) => Ok(FindUtxoLeafIndexResponse {
                 leaf_index: Some(leaf_index),
-                mempool: None,
+                mempool: false,
                 block_height: Some(block_height),
                 block_digest: Some(block_digest),
             }),
             None => Ok(FindUtxoLeafIndexResponse {
                 leaf_index: None,
-                mempool: None,
+                mempool: false,
                 block_height: None,
                 block_digest: None,
             }),
