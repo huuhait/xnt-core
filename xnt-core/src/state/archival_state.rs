@@ -774,6 +774,31 @@ impl ArchivalState {
         }
     }
 
+    /// Find UTXO by digest in AOCL range.
+    pub async fn find_utxo_leaf_index(
+        &self,
+        utxo_digest: Digest,
+        from_leaf_index: u64,
+        to_leaf_index: u64,
+    ) -> Option<(u64, BlockHeight, Digest)> {
+        let aocl = &self.archival_mutator_set.ams().aocl;
+
+        for leaf_index in (from_leaf_index..to_leaf_index).rev() {
+            if aocl.try_get_leaf(leaf_index).await == Some(utxo_digest) {
+                let block_digest = self
+                    .canonical_block_digest_of_aocl_index(leaf_index)
+                    .await
+                    .ok()??;
+
+                let block_height = self.get_block_header(block_digest).await?.height;
+
+                return Some((leaf_index, block_height, block_digest));
+            }
+        }
+
+        None
+    }
+
     /// searches max `max_search_depth` from tip for a matching transaction
     /// input.
     ///

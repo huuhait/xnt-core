@@ -1,11 +1,15 @@
 use async_trait::async_trait;
+use futures::StreamExt;
+use tasm_lib::prelude::Digest;
+use tasm_lib::prelude::Tip5;
+use tasm_lib::twenty_first::prelude::Mmr;
 use tracing::debug;
 
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
-use crate::api::export::{BlockHeight, NativeCurrencyAmount, TxInput};
+use crate::api::export::{NativeCurrencyAmount, TxInput};
 use crate::api::tx_initiation::builder::tx_input_list_builder::SortOrder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::send::TransactionSender;
@@ -28,11 +32,10 @@ use crate::protocol::consensus::block::block_selector::BlockSelector;
 use crate::protocol::consensus::block::Block;
 use crate::protocol::consensus::block::FUTUREDATING_LIMIT;
 
-use crate::protocol::consensus::transaction::utxo::Utxo;
+use crate::application::database::storage::storage_vec::traits::StorageVecStream;
 use crate::state::wallet::address::KeyType;
 use crate::state::wallet::change_policy::ChangePolicy;
 use crate::state::wallet::utxo_notification::UtxoNotificationMedium;
-use tasm_lib::prelude::Digest;
 
 #[async_trait]
 impl RpcApi for RpcServer {
@@ -342,6 +345,62 @@ impl RpcApi for RpcServer {
         })
     }
 
+    async fn find_utxo_leaf_index_call(
+        &self,
+        request: FindUtxoLeafIndexRequest,
+    ) -> RpcResult<FindUtxoLeafIndexResponse> {
+        let state = self.state.lock_guard().await;
+
+        // Check if utxo_digest is in mempool first
+        let in_mempool = state.mempool.fee_density_iter().any(|(txid, _)| {
+            state.mempool.get(txid).is_some_and(|tx| {
+                tx.kernel
+                    .outputs
+                    .iter()
+                    .any(|o| o.canonical_commitment == request.utxo_digest)
+            })
+        });
+
+        if in_mempool {
+            return Ok(FindUtxoLeafIndexResponse {
+                leaf_index: None,
+                mempool: Some(true),
+                block_height: None,
+                block_digest: None,
+            });
+        }
+
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+
+        let to_leaf_index = request.to_leaf_index.unwrap_or(num_leafs).min(num_leafs);
+        let from_leaf_index = request.from_leaf_index.unwrap_or(0);
+
+        let max_range: u64 = if self.unrestricted { u64::MAX } else { 10000 };
+        let range = to_leaf_index.saturating_sub(from_leaf_index).min(max_range);
+        let from_leaf_index = to_leaf_index.saturating_sub(range);
+
+        match state
+            .chain
+            .archival_state()
+            .find_utxo_leaf_index(request.utxo_digest, from_leaf_index, to_leaf_index)
+            .await
+        {
+            Some((leaf_index, block_height, block_digest)) => Ok(FindUtxoLeafIndexResponse {
+                leaf_index: Some(leaf_index),
+                mempool: None,
+                block_height: Some(block_height),
+                block_digest: Some(block_digest),
+            }),
+            None => Ok(FindUtxoLeafIndexResponse {
+                leaf_index: None,
+                mempool: None,
+                block_height: None,
+                block_digest: None,
+            }),
+        }
+    }
+
     async fn find_utxo_origin_call(
         &self,
         request: FindUtxoOriginRequest,
@@ -362,6 +421,127 @@ impl RpcApi for RpcServer {
         Ok(FindUtxoOriginResponse {
             block: block.map(|block| block.hash()),
         })
+    }
+
+    async fn block_info_call(&self, request: BlockInfoRequest) -> RpcResult<BlockInfoResponse> {
+        let state = self.state.lock_guard().await;
+        let network = self.state.cli().network;
+
+        let Some(block_digest) = request.selector.as_digest(&state).await else {
+            return Ok(None);
+        };
+
+        let Some(block) = state
+            .chain
+            .archival_state()
+            .get_block(block_digest)
+            .await
+            .unwrap()
+        else {
+            return Ok(None);
+        };
+
+        let header = block.header();
+        let tx_kernel = block.body().transaction_kernel.clone();
+
+        let mut inputs = Vec::new();
+        for (n, rr) in tx_kernel.inputs.iter().enumerate() {
+            let index_set = &rr.absolute_indices;
+            if let Some((mutxo, _)) = state
+                .wallet_state
+                .wallet_db
+                .monitored_utxo_by_index_set(index_set)
+                .await
+            {
+                let (_, _, confirmed_height) = mutxo.confirmed_in_block;
+                let sender_randomness = mutxo
+                    .membership_proof_ref_for_block(block_digest)
+                    .map(|mp| mp.sender_randomness)
+                    .unwrap();
+
+                inputs.push(BlockInfoInput {
+                    n,
+                    leaf_index: mutxo.aocl_leaf_index,
+                    utxo_digest: mutxo.addition_record().canonical_commitment,
+                    sender_randomness,
+                    confirmed_height,
+                    utxo: ApiUtxo::new(&mutxo.utxo),
+                });
+            }
+        }
+
+        // Get parent block to find starting AOCL index for outputs
+        let parent_digest = header.prev_block_digest;
+        let parent_aocl_num_leafs = if let Some(parent_block) = state
+            .chain
+            .archival_state()
+            .get_block(parent_digest)
+            .await
+            .unwrap()
+        {
+            parent_block
+                .mutator_set_accumulator_after()
+                .map(|msa| msa.aocl.num_leafs())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Collect known outputs from wallet
+        let known_outputs: std::collections::HashMap<Digest, _> = state
+            .wallet_state
+            .scan_for_utxos_announced_to_known_keys(&tx_kernel)
+            .map(|incoming| (incoming.addition_record().canonical_commitment, incoming))
+            .collect();
+
+        // Show all outputs, with wallet info when known
+        let outputs: Vec<BlockInfoOutput> = tx_kernel
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(n, ar)| {
+                let leaf_index = parent_aocl_num_leafs + n as u64;
+                let utxo_digest = ar.canonical_commitment;
+
+                if let Some(incoming) = known_outputs.get(&utxo_digest) {
+                    let receiving_address = state
+                        .wallet_state
+                        .find_spending_key_for_utxo(&incoming.utxo)
+                        .and_then(|key| key.to_address().to_bech32m(network).ok());
+
+                    BlockInfoOutput {
+                        n,
+                        leaf_index,
+                        utxo_digest,
+                        sender_randomness: Some(incoming.sender_randomness),
+                        receiving_address,
+                        receiver_digest: Some(incoming.receiver_preimage),
+                        utxo: Some(ApiUtxo::new(&incoming.utxo)),
+                    }
+                } else {
+                    BlockInfoOutput {
+                        n,
+                        leaf_index,
+                        utxo_digest,
+                        sender_randomness: None,
+                        receiving_address: None,
+                        receiver_digest: None,
+                        utxo: None,
+                    }
+                }
+            })
+            .collect();
+
+        Ok(Some(BlockInfo {
+            height: header.height,
+            digest: block.hash(),
+            timestamp: header.timestamp,
+            difficulty: header.difficulty,
+            size: block.size(),
+            fee: tx_kernel.fee.to_string(),
+            inputs,
+            outputs,
+        }))
     }
 
     async fn get_blocks_call(&self, request: GetBlocksRequest) -> RpcResult<GetBlocksResponse> {
@@ -675,96 +855,80 @@ impl RpcApi for RpcServer {
         let state = self.state.lock_guard().await;
         let network = self.state.cli().network;
 
-        let query_lock_script_hash: Option<Digest> =
-            if let Some(ref receiving_address_str) = request.receiving_address {
-                ReceivingAddress::from_bech32m(receiving_address_str, network)
-                    .ok()
-                    .map(|addr| addr.lock_script_hash())
+        let query_lock_script_hash = request
+            .receiving_address
+            .as_ref()
+            .and_then(|addr| ReceivingAddress::from_bech32m(addr, network).ok())
+            .map(|addr| addr.lock_script_hash());
+
+        let tip_digest = state.chain.light_state().hash();
+        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
+        let num_leafs = aocl.num_leafs().await;
+        let current_msa = state
+            .chain
+            .light_state()
+            .mutator_set_accumulator_after()
+            .expect("block from state must have mutator set after");
+
+        let monitored_utxos = state.wallet_state.wallet_db.monitored_utxos();
+        let stream = monitored_utxos.stream_values().await;
+        futures::pin_mut!(stream);
+
+        let mut history_rows = Vec::new();
+
+        while let Some(mutxo) = stream.next().await {
+            let Some(msmp) = mutxo.membership_proof_ref_for_block(tip_digest) else {
+                continue;
+            };
+
+            let leaf_index = mutxo.aocl_leaf_index;
+            let lock_script_hash = mutxo.utxo.lock_script_hash();
+            let (block_digest, timestamp, confirmed_height) = mutxo.confirmed_in_block;
+
+            let utxo_digest = if leaf_index > 0 && leaf_index < num_leafs {
+                Some(aocl.get_leaf_async(leaf_index).await)
             } else {
                 None
             };
 
-        let history = state
-            .get_balance_history_query(
-                request.leaf_index,
-                request.utxo_digest,
-                query_lock_script_hash,
-                request.sender_randomness,
-                request.confirmed_height,
-                request.spent_height,
-            )
-            .await;
+            let spent_height = mutxo.spent_in_block.and_then(|(_, _, h)| {
+                let is_spent = !current_msa.verify(Tip5::hash(&mutxo.utxo), msmp);
+                is_spent.then_some(h)
+            });
 
-        let futures = history
-            .iter()
-            .map(|(i, ud, sr, h, t, bh, sh, utxo)| async {
-                let lock_script_hash = utxo.lock_script_hash();
+            let matches = request.leaf_index.is_none_or(|q| leaf_index == q)
+                && request.utxo_digest.is_none_or(|q| utxo_digest == Some(q))
+                && query_lock_script_hash.is_none_or(|q| lock_script_hash == q)
+                && request
+                    .sender_randomness
+                    .is_none_or(|q| msmp.sender_randomness == q)
+                && request
+                    .confirmed_height
+                    .is_none_or(|q| confirmed_height == q)
+                && request.spent_height.is_none_or(|q| spent_height == Some(q));
 
-                let address = state
-                    .wallet_state
-                    .get_all_known_addressable_spending_keys()
-                    .find(|k| k.lock_script_hash() == lock_script_hash)
-                    .map(|key| key.to_address());
+            if !matches {
+                continue;
+            }
 
-                (*i, *ud, *sr, *h, *bh, *sh, *t, address, utxo.clone())
-            })
-            .collect::<Vec<_>>();
+            let receiving_address = state
+                .wallet_state
+                .get_all_known_addressable_spending_keys()
+                .find(|k| k.lock_script_hash() == lock_script_hash)
+                .and_then(|key| key.to_address().to_bech32m(network).ok());
 
-        let display_history: Vec<(
-            u64,
-            Option<Digest>,
-            Digest,
-            Digest,
-            BlockHeight,
-            Option<BlockHeight>,
-            Timestamp,
-            Option<ReceivingAddress>,
-            Utxo,
-        )> = futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        let history_rows = display_history
-            .iter()
-            .map(
-                |(
-                    leaf_index,
-                    utxo_digest,
-                    sender_randomness,
-                    digest,
-                    confirmed_height,
-                    spent_height,
-                    timestamp,
-                    receiving_address,
-                    utxo,
-                )| {
-                    let receiving_address_str: Option<String>;
-
-                    if let Some(ref receiving_address) = *receiving_address {
-                        receiving_address_str = Some(
-                            receiving_address
-                                .to_bech32m(network)
-                                .expect("valid address"),
-                        );
-                    } else {
-                        receiving_address_str = None;
-                    }
-
-                    History {
-                        leaf_index: *leaf_index,
-                        utxo_digest: *utxo_digest,
-                        sender_randomness: *sender_randomness,
-                        digest: *digest,
-                        confirmed_height: *confirmed_height,
-                        spent_height: *spent_height,
-                        timestamp: *timestamp,
-                        receiving_address: receiving_address_str,
-                        utxo: ApiUtxo::new(utxo),
-                    }
-                },
-            )
-            .collect();
+            history_rows.push(History {
+                leaf_index,
+                utxo_digest,
+                sender_randomness: msmp.sender_randomness,
+                digest: block_digest,
+                confirmed_height,
+                spent_height,
+                timestamp,
+                receiving_address,
+                utxo: ApiUtxo::new(&mutxo.utxo),
+            });
+        }
 
         Ok(history_rows)
     }
@@ -775,48 +939,80 @@ impl RpcApi for RpcServer {
     ) -> RpcResult<SentTransactionResponse> {
         let state = self.state.lock_guard().await;
 
-        let sent_transactions = state
-            .get_sent_transactions(
-                request.sender_randomness,
-                request.receiver_digest,
-                request.lock_script_hash,
-                request.limit,
-                request.page,
-            )
-            .await;
-
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
         let num_leafs = aocl.num_leafs().await;
 
+        let matches_filter = |tx: &crate::state::wallet::sent_transaction::SentTransaction| {
+            request
+                .sender_randomness
+                .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.sender_randomness() == q))
+                && request
+                    .receiver_digest
+                    .is_none_or(|q| tx.tx_outputs.iter().any(|o| o.receiver_digest() == q))
+                && request.lock_script_hash.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.utxo().lock_script_hash() == q)
+                })
+                && request.utxo_digest.is_none_or(|q| {
+                    tx.tx_outputs
+                        .iter()
+                        .any(|o| o.addition_record().canonical_commitment == q)
+                })
+                && request.timestamp.is_none_or(|q| tx.timestamp == q)
+        };
+
+        let limit = request.limit.unwrap_or(100).min(1000) as usize;
+        let page = request.page.unwrap_or(1);
+        let offset = ((page.saturating_sub(1)) * limit as u64) as usize;
+
+        let send_txs_db = state.wallet_state.wallet_db.sent_transactions();
+        let stream = send_txs_db.stream_values().await;
+        futures::pin_mut!(stream);
+
         let mut sent_txs = Vec::new();
-        for tx in sent_transactions {
-            let out_utxos = tx.tx_outputs.utxos();
-            let out_sender_randomness = tx.tx_outputs.sender_randomnesses();
-            let out_receiver_digest = tx.tx_outputs.receiver_digests();
+        let mut i = 0;
 
-            let mut tx_outputs = Vec::new();
-            for (index, utxo) in out_utxos.iter().enumerate() {
-                tx_outputs.push(SentTxOutput {
-                    utxo: ApiUtxo::new(utxo),
-                    sender_randomness: out_sender_randomness[index],
-                    receiver_digest: out_receiver_digest[index],
-                });
+        while let Some(tx) = stream.next().await {
+            if !matches_filter(&tx) {
+                continue;
             }
 
-            let mut tx_inputs = Vec::new();
-            for (leaf_index, input_utxo) in &tx.tx_inputs {
-                let utxo_digest = if *leaf_index > 0 && *leaf_index < num_leafs {
-                    Some(aocl.get_leaf_async(*leaf_index).await)
-                } else {
-                    None
-                };
+            i += 1;
 
-                tx_inputs.push(SentTxInput {
-                    leaf_index: *leaf_index,
-                    utxo_digest,
-                    utxo: ApiUtxo::new(input_utxo),
-                });
+            if i <= offset {
+                continue;
             }
+
+            if i > offset + limit {
+                break;
+            }
+
+            let tx_outputs: Vec<SentTxOutput> = tx
+                .tx_outputs
+                .iter()
+                .map(|o| SentTxOutput {
+                    utxo: ApiUtxo::new(&o.utxo()),
+                    utxo_digest: o.addition_record().canonical_commitment,
+                    sender_randomness: o.sender_randomness(),
+                    receiver_digest: o.receiver_digest(),
+                })
+                .collect();
+
+            let tx_inputs: Vec<SentTxInput> =
+                futures::future::join_all(tx.tx_inputs.iter().map(|(leaf_index, utxo)| async {
+                    let utxo_digest = if *leaf_index > 0 && *leaf_index < num_leafs {
+                        Some(aocl.get_leaf_async(*leaf_index).await)
+                    } else {
+                        None
+                    };
+                    SentTxInput {
+                        leaf_index: *leaf_index,
+                        utxo_digest,
+                        utxo: ApiUtxo::new(utxo),
+                    }
+                }))
+                .await;
 
             sent_txs.push(SentTxToRespResponse {
                 tx_inputs,
@@ -826,69 +1022,8 @@ impl RpcApi for RpcServer {
                 tip_when_sent: tx.tip_when_sent,
             });
         }
+
         Ok(sent_txs)
-    }
-
-    async fn sent_transaction_by_sender_randomness_call(
-        &self,
-        request: SentTransactionBySenderRandomnessRequest,
-    ) -> RpcResult<SentTransactionBySenderRandomnessResponse> {
-        let state = self.state.lock_guard().await;
-
-        let sent_transactions = state
-            .get_sent_transactions(Some(request.sender_randomness), None, None, None, None)
-            .await;
-
-        let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
-        let num_leafs = aocl.num_leafs().await;
-
-        for tx in sent_transactions {
-            if tx.timestamp != request.timestamp {
-                continue;
-            }
-
-            let sender_randomnesses = tx.tx_outputs.sender_randomnesses();
-            if !sender_randomnesses.contains(&request.sender_randomness) {
-                continue;
-            }
-
-            let out_utxos = tx.tx_outputs.utxos();
-            let out_receiver_digest = tx.tx_outputs.receiver_digests();
-
-            let mut tx_outputs = Vec::new();
-            for (index, utxo) in out_utxos.iter().enumerate() {
-                tx_outputs.push(SentTxOutput {
-                    utxo: ApiUtxo::new(utxo),
-                    sender_randomness: sender_randomnesses[index],
-                    receiver_digest: out_receiver_digest[index],
-                });
-            }
-
-            let mut tx_inputs = Vec::new();
-            for (index, input_utxo) in &tx.tx_inputs {
-                let utxo_digest = if *index > 0 && *index < num_leafs {
-                    Some(aocl.get_leaf_async(*index).await)
-                } else {
-                    None
-                };
-
-                tx_inputs.push(SentTxInput {
-                    leaf_index: *index,
-                    utxo_digest,
-                    utxo: ApiUtxo::new(input_utxo),
-                });
-            }
-
-            return Ok(Some(SentTxToRespResponse {
-                tx_inputs,
-                tx_outputs,
-                fee: tx.fee.to_string(),
-                timestamp: tx.timestamp,
-                tip_when_sent: tx.tip_when_sent,
-            }));
-        }
-
-        Ok(None)
     }
 
     async fn validate_amount_call(
@@ -970,28 +1105,42 @@ impl RpcApi for RpcServer {
                 })
             })?;
 
-        let id = resp.transaction().txid();
-
         let timestamp = resp.details().timestamp;
 
-        let notification_list: Vec<SendTxNotificationData> = resp
+        let inputs: Vec<SendTxInput> = resp
+            .details()
+            .tx_inputs
+            .iter()
+            .map(|input| SendTxInput {
+                leaf_index: input.mutator_set_mp().aocl_leaf_index,
+                utxo_digest: input.addition_record().canonical_commitment,
+                utxo: SendTxUtxo {
+                    lock_script_hash: input.utxo.lock_script_hash(),
+                    amount: input.utxo.get_native_currency_amount().to_string(),
+                },
+            })
+            .collect();
+
+        let outputs: Vec<SendTxOutput> = resp
             .details()
             .tx_outputs
             .iter()
-            .filter(|output| !output.is_change())
-            .map(|output| SendTxNotificationData {
-                utxo: SendTxNotificationUtxo {
+            .map(|output| SendTxOutput {
+                utxo: SendTxUtxo {
                     lock_script_hash: output.utxo().lock_script_hash(),
                     amount: output.utxo().get_native_currency_amount().to_string(),
                 },
+                utxo_digest: output.addition_record().canonical_commitment,
                 sender_randomness: output.sender_randomness(),
+                is_owned: output.is_owned(),
+                is_change: output.is_change(),
             })
             .collect();
 
         Ok(SendTxResponse {
-            id,
             timestamp,
-            notification_data: notification_list,
+            inputs,
+            outputs,
         })
     }
 
@@ -1073,76 +1222,6 @@ impl RpcApi for RpcServer {
             selected_utxos,
             total_selected_amount: total_selected_amount.to_string(),
         })
-    }
-
-    async fn block_api_call(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse> {
-        let state = self.state.lock_guard().await;
-        let network = self.state.cli().network;
-
-        let Some(digest) = request.selector.as_digest(&state).await else {
-            return Ok(None);
-        };
-
-        let archival_state = state.chain.archival_state();
-
-        let Some(block) = archival_state.get_block(digest).await.unwrap() else {
-            return Ok(None);
-        };
-
-        let header = block.header();
-        let body = block.body();
-        let digest = block.hash();
-        let transaction_kernel = body.transaction_kernel.clone();
-
-        let inputs = state
-            .wallet_state
-            .scan_for_spent_utxos(&transaction_kernel)
-            .await;
-
-        let mut transaction_inputs = Vec::with_capacity(inputs.len());
-        for (_, (utxo, _)) in inputs {
-            let address = state
-                .wallet_state
-                .find_spending_key_for_utxo(&utxo)
-                .map(|key| key.to_address().to_bech32m(network))
-                .and_then(|result| result.ok());
-
-            transaction_inputs.push(InputUtxo {
-                utxo: ApiUtxo::new(&utxo),
-                receiving_address: address,
-            });
-        }
-
-        let outputs: Vec<OutputUtxo> = state
-            .wallet_state
-            .scan_for_utxos_announced_to_known_keys(&transaction_kernel)
-            .map(|incoming_utxo| {
-                let address = state
-                    .wallet_state
-                    .find_spending_key_for_utxo(&incoming_utxo.utxo)
-                    .map(|key| key.to_address().to_bech32m(network))
-                    .and_then(|result| result.ok());
-
-                OutputUtxo {
-                    sender_randomness: incoming_utxo.sender_randomness,
-                    receiver_preimage: incoming_utxo.receiver_preimage,
-                    receiving_address: address,
-                    utxo: ApiUtxo::new(&incoming_utxo.utxo),
-                }
-            })
-            .collect();
-
-        Ok(Some(BlockApiData {
-            height: header.height,
-            digest,
-            timestamp: header.timestamp,
-            difficulty: header.difficulty,
-            size: block.size(),
-            fee: transaction_kernel.fee.to_string(),
-            transaction_kernel_id: transaction_kernel.txid(),
-            inputs: transaction_inputs,
-            outputs,
-        }))
     }
 }
 

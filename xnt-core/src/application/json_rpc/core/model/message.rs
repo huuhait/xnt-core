@@ -19,7 +19,7 @@ use crate::application::json_rpc::core::model::wallet::transaction::RpcTransacti
 use crate::protocol::consensus::block::difficulty_control::Difficulty;
 use crate::protocol::proof_abstractions::timestamp::Timestamp;
 
-use crate::api::export::{BlockHeight, TransactionKernelId};
+use crate::api::export::BlockHeight;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -253,6 +253,31 @@ pub struct GetUtxoDigestResponse {
     pub digest: Option<Digest>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoLeafIndexRequest {
+    pub utxo_digest: Digest,
+
+    #[serde(default)]
+    pub from_leaf_index: Option<u64>,
+
+    #[serde(default)]
+    pub to_leaf_index: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FindUtxoLeafIndexResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leaf_index: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mempool: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_height: Option<BlockHeight>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_digest: Option<Digest>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
 pub struct FindUtxoOriginRequest {
@@ -267,6 +292,54 @@ pub struct FindUtxoOriginRequest {
 pub struct FindUtxoOriginResponse {
     pub block: Option<Digest>,
 }
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoRequest {
+    pub selector: RpcBlockSelector,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoInput {
+    pub n: usize,
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    pub sender_randomness: Digest,
+    pub confirmed_height: BlockHeight,
+    pub utxo: ApiUtxo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfoOutput {
+    pub n: usize,
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_randomness: Option<Digest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiving_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receiver_digest: Option<Digest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub utxo: Option<ApiUtxo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockInfo {
+    pub height: BlockHeight,
+    pub digest: Digest,
+    pub timestamp: Timestamp,
+    pub difficulty: Difficulty,
+    pub size: usize,
+    pub fee: String,
+    pub inputs: Vec<BlockInfoInput>,
+    pub outputs: Vec<BlockInfoOutput>,
+}
+
+pub type BlockInfoResponse = Option<BlockInfo>;
 
 #[derive(Clone, Copy, Debug, Serialize_tuple, Deserialize_tuple)]
 #[serde(rename_all = "camelCase")]
@@ -435,6 +508,7 @@ pub struct SentTxInput {
 #[serde(rename_all = "camelCase")]
 pub struct SentTxOutput {
     pub utxo: ApiUtxo,
+    pub utxo_digest: Digest,
     pub sender_randomness: Digest,
     pub receiver_digest: Digest,
 }
@@ -455,20 +529,13 @@ pub struct SentTransactionRequest {
     pub sender_randomness: Option<Digest>,
     pub receiver_digest: Option<Digest>,
     pub lock_script_hash: Option<Digest>,
+    pub utxo_digest: Option<Digest>,
+    pub timestamp: Option<Timestamp>,
     pub limit: Option<u64>,
     pub page: Option<u64>,
 }
 
 pub type SentTransactionResponse = Vec<SentTxToRespResponse>;
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SentTransactionBySenderRandomnessRequest {
-    pub sender_randomness: Digest,
-    pub timestamp: Timestamp,
-}
-
-pub type SentTransactionBySenderRandomnessResponse = Option<SentTxToRespResponse>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -527,12 +594,6 @@ pub struct SelectSpendableInputsResponse {
     pub total_selected_amount: String,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BlockApiRequest {
-    pub selector: RpcBlockSelector,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiUtxo {
@@ -557,38 +618,6 @@ impl ApiUtxo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct InputUtxo {
-    pub utxo: ApiUtxo,
-    pub receiving_address: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OutputUtxo {
-    pub utxo: ApiUtxo,
-    pub receiver_preimage: Digest,
-    pub sender_randomness: Digest,
-    pub receiving_address: Option<String>,
-}
-
-pub type BlockApiResponse = Option<BlockApiData>;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BlockApiData {
-    pub height: BlockHeight,
-    pub digest: Digest,
-    pub timestamp: Timestamp,
-    pub difficulty: Difficulty,
-    pub size: usize,
-    pub fee: String,
-    pub transaction_kernel_id: TransactionKernelId,
-    pub inputs: Vec<InputUtxo>,
-    pub outputs: Vec<OutputUtxo>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SendTxRequest {
     pub amount: String,
     pub fee: String,
@@ -599,22 +628,33 @@ pub struct SendTxRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SendTxNotificationUtxo {
+pub struct SendTxUtxo {
     pub lock_script_hash: Digest,
     pub amount: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SendTxNotificationData {
-    pub utxo: SendTxNotificationUtxo,
+pub struct SendTxInput {
+    pub leaf_index: u64,
+    pub utxo_digest: Digest,
+    pub utxo: SendTxUtxo,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTxOutput {
+    pub utxo: SendTxUtxo,
+    pub utxo_digest: Digest,
     pub sender_randomness: Digest,
+    pub is_owned: bool,
+    pub is_change: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendTxResponse {
-    pub id: crate::state::transaction::transaction_kernel_id::TransactionKernelId,
     pub timestamp: Timestamp,
-    pub notification_data: Vec<SendTxNotificationData>,
+    pub inputs: Vec<SendTxInput>,
+    pub outputs: Vec<SendTxOutput>,
 }

@@ -95,7 +95,13 @@ pub enum RpcMethods {
     GetUtxoDigest,
 
     #[namespace(Namespace::Archival)]
+    FindUtxoLeafIndex,
+
+    #[namespace(Namespace::Archival)]
     FindUtxoOrigin,
+
+    #[namespace(Namespace::Wallet)]
+    BlockInfo,
 
     #[namespace(Namespace::Wallet)]
     GetBlocks,
@@ -120,6 +126,7 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Mempool)]
     GetTransactionProof,
+
     #[namespace(Namespace::Wallet)]
     GenerateAddress,
 
@@ -136,9 +143,6 @@ pub enum RpcMethods {
     SentTransaction,
 
     #[namespace(Namespace::Wallet)]
-    SentTransactionBySenderRandomness,
-
-    #[namespace(Namespace::Wallet)]
     ValidateAmount,
 
     #[namespace(Namespace::Wallet)]
@@ -152,9 +156,6 @@ pub enum RpcMethods {
 
     #[namespace(Namespace::Wallet)]
     SelectSpendableInputs,
-
-    #[namespace(Namespace::Wallet)]
-    BlockApi,
 }
 
 #[cfg(test)]

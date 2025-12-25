@@ -244,14 +244,15 @@ pub trait RpcApi: Sync + Send {
         request: IsBlockCanonicalRequest,
     ) -> RpcResult<IsBlockCanonicalResponse>;
 
-    async fn get_utxo_digest(&self, leaf_index: u64) -> RpcResult<GetUtxoDigestResponse> {
-        self.get_utxo_digest_call(GetUtxoDigestRequest { leaf_index })
-            .await
-    }
     async fn get_utxo_digest_call(
         &self,
         request: GetUtxoDigestRequest,
     ) -> RpcResult<GetUtxoDigestResponse>;
+
+    async fn find_utxo_leaf_index_call(
+        &self,
+        request: FindUtxoLeafIndexRequest,
+    ) -> RpcResult<FindUtxoLeafIndexResponse>;
 
     async fn find_utxo_origin(
         &self,
@@ -270,6 +271,11 @@ pub trait RpcApi: Sync + Send {
     ) -> RpcResult<FindUtxoOriginResponse>;
 
     /* Wallet */
+
+    async fn block_info(&self, selector: RpcBlockSelector) -> RpcResult<BlockInfoResponse> {
+        self.block_info_call(BlockInfoRequest { selector }).await
+    }
+    async fn block_info_call(&self, request: BlockInfoRequest) -> RpcResult<BlockInfoResponse>;
 
     async fn get_blocks(
         &self,
@@ -411,18 +417,6 @@ pub trait RpcApi: Sync + Send {
         request: SentTransactionRequest,
     ) -> RpcResult<SentTransactionResponse>;
 
-    async fn sent_transaction_by_sender_randomness(
-        &self,
-        request: SentTransactionBySenderRandomnessRequest,
-    ) -> RpcResult<SentTransactionBySenderRandomnessResponse> {
-        self.sent_transaction_by_sender_randomness_call(request)
-            .await
-    }
-    async fn sent_transaction_by_sender_randomness_call(
-        &self,
-        request: SentTransactionBySenderRandomnessRequest,
-    ) -> RpcResult<SentTransactionBySenderRandomnessResponse>;
-
     async fn validate_amount(
         &self,
         request: ValidateAmountRequest,
@@ -468,9 +462,4 @@ pub trait RpcApi: Sync + Send {
         &self,
         request: SelectSpendableInputsRequest,
     ) -> RpcResult<SelectSpendableInputsResponse>;
-
-    async fn block_api(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse> {
-        self.block_api_call(request).await
-    }
-    async fn block_api_call(&self, request: BlockApiRequest) -> RpcResult<BlockApiResponse>;
 }
