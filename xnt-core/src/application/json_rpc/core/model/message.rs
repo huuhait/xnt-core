@@ -639,6 +639,7 @@ pub struct SendTxOutput {
 #[serde(rename_all = "camelCase")]
 pub struct SendTxResponse {
     pub timestamp: Timestamp,
+    pub tip_when_sent: Digest,
     pub inputs: Vec<SendTxInput>,
     pub outputs: Vec<SendTxOutput>,
 }

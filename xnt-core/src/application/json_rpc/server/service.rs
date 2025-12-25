@@ -5,12 +5,11 @@ use tasm_lib::prelude::Tip5;
 use tasm_lib::twenty_first::prelude::Mmr;
 use tracing::debug;
 
+use crate::api::export::NativeCurrencyAmount;
 use crate::api::export::ReceivingAddress;
 use crate::api::export::Timestamp;
 use crate::api::export::Transaction;
 use crate::api::export::TransactionProof;
-use crate::api::export::{NativeCurrencyAmount, TxInput};
-use crate::api::tx_initiation::builder::tx_input_list_builder::SortOrder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::send::TransactionSender;
 use crate::api::wallet::Wallet;
@@ -454,16 +453,12 @@ impl RpcApi for RpcServer {
                 .await
             {
                 let (_, _, confirmed_height) = mutxo.confirmed_in_block;
-                let sender_randomness = mutxo
-                    .membership_proof_ref_for_block(block_digest)
-                    .map(|mp| mp.sender_randomness)
-                    .unwrap();
 
                 inputs.push(BlockInfoInput {
                     n,
                     leaf_index: mutxo.aocl_leaf_index,
                     utxo_digest: mutxo.addition_record().canonical_commitment,
-                    sender_randomness,
+                    sender_randomness: mutxo.sender_randomness,
                     confirmed_height,
                     utxo: ApiUtxo::new(&mutxo.utxo),
                 });
@@ -1106,6 +1101,7 @@ impl RpcApi for RpcServer {
             })?;
 
         let timestamp = resp.details().timestamp;
+        let tip_when_sent = self.state.lock_guard().await.chain.light_state().hash();
 
         let inputs: Vec<SendTxInput> = resp
             .details()
@@ -1139,6 +1135,7 @@ impl RpcApi for RpcServer {
 
         Ok(SendTxResponse {
             timestamp,
+            tip_when_sent,
             inputs,
             outputs,
         })

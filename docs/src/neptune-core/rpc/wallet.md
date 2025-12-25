@@ -78,6 +78,7 @@ Sends a transaction.
 **Returns**
 
 - `timestamp` - number, transaction timestamp in milliseconds
+- `tipWhenSent` - string, hex block digest at time of sending
 - `inputs` - array, spent UTXOs
 - `outputs` - array, created UTXOs
 
@@ -107,6 +108,7 @@ curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc":"2.0","metho
   "id": 1,
   "result": {
     "timestamp": 1703500000000,
+    "tipWhenSent": "04e19a9adfefa811a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
     "inputs": [
       {
         "leafIndex": 12345,

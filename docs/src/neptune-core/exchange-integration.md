@@ -26,7 +26,7 @@ Neptune is a privacy-focused cryptocurrency using zero-knowledge proofs. Key con
 ### Configuration
 
 ```bash
-neptune-core --listen-rpc 0.0.0.0:9897 --rpc-modules Node,Chain,Wallet,Archival
+neptune-core --listen-rpc 127.0.0.1:9897 --rpc-modules Node,Chain,Wallet,Archival
 ```
 
 ### Health Check
@@ -168,6 +168,7 @@ Response:
   "id": 1,
   "result": {
     "timestamp": 1703500000000,
+    "tipWhenSent": "04e19a9adfefa811...",
     "inputs": [...],
     "outputs": [
       {
@@ -185,7 +186,7 @@ Response:
 }
 ```
 
-**Important:** Store the `utxoDigest` from the non-change output for tracking.
+**Important:** Store the `utxoDigest` from the non-change output for tracking. The `tipWhenSent` is the block digest at the time the transaction was sent, useful for tracking confirmation progress.
 
 ### 4. Track Withdrawal Status
 
