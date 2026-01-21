@@ -439,6 +439,15 @@ enum XntXntErrorCode xnt_tx_builder_add_output(struct XntTransactionBuilderHandl
                                                Xnti128 amount,
                                                const struct XntXntDigest *sender_randomness);
 
+// Add output with optional payment_id
+// payment_id: 0 means no payment_id (send to address as-is), non-zero adds payment_id
+xnt_
+enum XntXntErrorCode xnt_tx_builder_add_output_with_payment_id(struct XntTransactionBuilderHandle *builder,
+                                                               const struct XntReceivingAddressHandle *receiving_address,
+                                                               Xnti128 amount,
+                                                               const struct XntXntDigest *sender_randomness,
+                                                               uint64_t payment_id);
+
 // Set change address
 xnt_
 enum XntXntErrorCode xnt_tx_builder_set_change(struct XntTransactionBuilderHandle *builder,

@@ -93,6 +93,15 @@ mod tests {
         worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
     }
 
+    /// tests that subaddress payment_id is preserved through encrypt/decrypt cycle
+    #[proptest]
+    fn test_subaddress_payment_id_preserves(
+        #[strategy(arb())] seed: Digest,
+        #[strategy(1_u64..u64::MAX)] payment_id: u64,
+    ) {
+        worker::test_subaddress_payment_id(seed, payment_id);
+    }
+
     mod worker {
         use num_traits::ConstZero;
         use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -188,6 +197,49 @@ mod tests {
             assert_eq!(utxo, utxo_again);
             assert_eq!(sender_randomness, sender_randomness_again);
             assert_eq!(BFieldElement::ZERO, payment_id_again);
+        }
+
+        /// Tests that subaddress payment_id is preserved through encrypt/decrypt cycle
+        ///
+        /// This verifies:
+        /// 1. Create a subaddress with a non-zero payment_id
+        /// 2. Encrypt a UTXO notification using the subaddress
+        /// 3. Decrypt using the base spending key
+        /// 4. Verify the payment_id in the decrypted result matches original
+        pub fn test_subaddress_payment_id(seed: Digest, payment_id_value: u64) {
+            use crate::state::wallet::address::common::SubAddress;
+
+            // 1. create base spending key and its receiving address
+            let spending_key = GenerationSpendingKey::derive_from_seed(seed);
+            let base_addr = spending_key.to_address();
+
+            // 2. create subaddress with payment_id
+            let payment_id = BFieldElement::new(payment_id_value);
+            let subaddr = base_addr.with_payment_id(payment_id).unwrap();
+
+            // 3. create utxo with random amount
+            let amount = NativeCurrencyAmount::coins(42);
+            let utxo = Utxo::new_native_currency(base_addr.lock_script().hash(), amount);
+
+            // 4. generate sender randomness
+            let sender_randomness: Digest = random();
+
+            // 5. encrypt using subaddress (this should include payment_id in ciphertext)
+            let notification_payload =
+                UtxoNotificationPayload::new(utxo.clone(), sender_randomness);
+            let ciphertext = subaddr.encrypt(&notification_payload);
+
+            // 6. decrypt using base spending key
+            let (utxo_again, sender_randomness_again, payment_id_again) =
+                spending_key.decrypt(&ciphertext).unwrap();
+
+            // 7. verify all fields including payment_id
+            assert_eq!(utxo, utxo_again);
+            assert_eq!(sender_randomness, sender_randomness_again);
+            assert_eq!(
+                payment_id, payment_id_again,
+                "payment_id should be preserved through encrypt/decrypt cycle"
+            );
         }
 
         /// tests key generation, signing, and decrypting with a [SpendingKey]

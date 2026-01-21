@@ -958,6 +958,33 @@ impl XntTransactionBuilder {
         Ok(())
     }
 
+    /// Add output with optional payment_id
+    /// payment_id: 0 or null means no payment_id (send to address as-is), non-zero adds payment_id
+    /// Note: payment_id only works with Generation addresses (not subaddress or symmetric)
+    #[napi]
+    pub fn add_output_with_payment_id(
+        &mut self,
+        receiving_address: &XntReceivingAddress,
+        amount: BigInt,
+        sender_randomness_hex: String,
+        payment_id: Option<i64>,
+    ) -> Result<()> {
+        let sr_bytes = hex::decode(&sender_randomness_hex)
+            .map_err(|e| Error::from_reason(format!("invalid hex: {e}")))?;
+        if sr_bytes.len() != 40 {
+            return Err(Error::from_reason("sender_randomness must be 40 bytes"));
+        }
+        let sr = crate::core::Digest::from_bytes(sr_bytes.try_into().unwrap());
+        let (amt_i128, lossless) = amount.get_i128();
+        if !lossless {
+            return Err(Error::from_reason("amount overflow: value too large for i128"));
+        }
+        let pid = payment_id.filter(|&id| id != 0).map(|id| id as u64);
+        self.inner
+            .add_output_with_payment_id(&receiving_address.inner, amt_i128, sr, pid)
+            .map_err(|e| Error::from_reason(format!("{e}")))
+    }
+
     /// Set change address
     #[napi]
     pub fn set_change(&mut self, address: &XntAddress, sender_randomness_hex: String) -> Result<()> {

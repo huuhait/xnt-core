@@ -134,6 +134,57 @@ impl TransactionBuilder {
         });
     }
 
+    /// Add output to an address with optional payment_id
+    ///
+    /// If payment_id is Some(non-zero), creates a subaddress output for tracking.
+    /// If payment_id is None or Some(0), sends to the address as-is.
+    ///
+    /// Note: payment_id only works with Generation addresses (not subaddress or symmetric).
+    pub fn add_output_with_payment_id(
+        &mut self,
+        receiving_address: &ReceivingAddress,
+        amount: i128,
+        sender_randomness: Digest,
+        payment_id: Option<u64>,
+    ) -> super::error::Result<()> {
+        use neptune_privacy::prelude::twenty_first::prelude::BFieldElement;
+        use neptune_privacy::state::wallet::address::ReceivingAddress as CoreReceivingAddress;
+
+        let final_address = match payment_id {
+            Some(id) if id != 0 => {
+                // Must be a Generation address to add payment_id
+                match &receiving_address.inner {
+                    CoreReceivingAddress::Generation(gen_addr) => {
+                        let subaddr = gen_addr
+                            .with_payment_id(BFieldElement::new(id))
+                            .map_err(|e| super::error::XntError::InvalidInput(e.to_string()))?;
+                        ReceivingAddress {
+                            inner: CoreReceivingAddress::GenerationSubAddr(subaddr),
+                        }
+                    }
+                    CoreReceivingAddress::GenerationSubAddr(_) => {
+                        return Err(super::error::XntError::InvalidInput(
+                            "cannot add payment_id to a subaddress".to_string(),
+                        ));
+                    }
+                    CoreReceivingAddress::Symmetric(_) => {
+                        return Err(super::error::XntError::InvalidInput(
+                            "payment_id not supported for symmetric addresses".to_string(),
+                        ));
+                    }
+                }
+            }
+            _ => receiving_address.clone(),
+        };
+
+        self.outputs.push(TxOutputSpec {
+            receiving_address: final_address,
+            amount,
+            sender_randomness,
+        });
+        Ok(())
+    }
+
     /// Get outputs for inspection
     pub fn outputs(&self) -> &[TxOutputSpec] {
         &self.outputs

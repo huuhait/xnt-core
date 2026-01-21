@@ -74,6 +74,35 @@ pub extern "C" fn xnt_tx_builder_add_output(
     XntErrorCode::Ok
 }
 
+/// Add output with optional payment_id
+/// payment_id: 0 means no payment_id (send to address as-is), non-zero adds payment_id
+#[no_mangle]
+pub extern "C" fn xnt_tx_builder_add_output_with_payment_id(
+    builder: *mut TransactionBuilderHandle,
+    receiving_address: *const ReceivingAddressHandle,
+    amount: i128,
+    sender_randomness: *const XntDigest,
+    payment_id: u64,
+) -> XntErrorCode {
+    ffi_begin!();
+    if builder.is_null() || receiving_address.is_null() || sender_randomness.is_null() {
+        set_last_error("null pointer");
+        return XntErrorCode::NullPointer;
+    }
+
+    let b = ffi_mut!(builder);
+    let sr = crate::core::Digest::from_bytes(ffi_ref!(sender_randomness).bytes);
+    let pid = if payment_id == 0 { None } else { Some(payment_id) };
+
+    match b.0.add_output_with_payment_id(&ffi_ref!(receiving_address).0, amount, sr, pid) {
+        Ok(_) => XntErrorCode::Ok,
+        Err(e) => {
+            set_last_error(&format!("{e}"));
+            XntErrorCode::InvalidInput
+        }
+    }
+}
+
 /// Set change address
 #[no_mangle]
 pub extern "C" fn xnt_tx_builder_set_change(

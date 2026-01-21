@@ -39,6 +39,7 @@ use crate::dashboard_rpc_client::DashboardRpcClient;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SendScreenWidget {
     Address,
+    PaymentId,
     Amount,
     Fee,
     Ok,
@@ -60,6 +61,7 @@ pub struct SendScreen {
     bg: Color,
     in_focus: bool,
     address: String,
+    payment_id: String,
     rpc_client: Arc<DashboardRpcClient>,
     focus: Arc<Mutex<SendScreenWidget>>,
     amount: String,
@@ -79,6 +81,7 @@ impl SendScreen {
             bg: Color::Black,
             in_focus: false,
             address: "".to_string(),
+            payment_id: "".to_string(),
             rpc_client: rpc_server,
             focus: Arc::new(Mutex::new(SendScreenWidget::Address)),
             amount: "".to_string(),
@@ -96,6 +99,7 @@ impl SendScreen {
         rpc_client: Arc<DashboardRpcClient>,
         token: auth::Token,
         address: String,
+        payment_id: String,
         amount: String,
         fee: String,
         notice_arc: Arc<Mutex<String>>,
@@ -103,6 +107,8 @@ impl SendScreen {
         network: Network,
         refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) {
+        use neptune_privacy::prelude::twenty_first::prelude::BFieldElement;
+
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
 
         *notice_arc.lock().await = "sending ...".to_string();
@@ -134,7 +140,7 @@ impl SendScreen {
             }
         };
 
-        let valid_address = match ReceivingAddress::from_bech32m(&address, network) {
+        let base_address = match ReceivingAddress::from_bech32m(&address, network) {
             Ok(a) => a,
             Err(e) => {
                 *notice_arc.lock().await = format!("address: {e}");
@@ -143,6 +149,65 @@ impl SendScreen {
                 return;
             }
         };
+
+        // Parse payment_id and create subaddress if provided
+        let valid_address = if payment_id.trim().is_empty() {
+            base_address
+        } else {
+            // Parse payment_id as u64
+            let pid: u64 = match payment_id.trim().parse() {
+                Ok(id) if id > 0 => id,
+                Ok(_) => {
+                    *notice_arc.lock().await = "payment_id must be > 0".to_string();
+                    *reset_me.lock().await = ResetType::Notice;
+                    refresh_tx.send(()).await.unwrap();
+                    return;
+                }
+                Err(e) => {
+                    *notice_arc.lock().await = format!("payment_id: {e}");
+                    *reset_me.lock().await = ResetType::Notice;
+                    refresh_tx.send(()).await.unwrap();
+                    return;
+                }
+            };
+
+            // Create subaddress from base address with payment_id
+            match &base_address {
+                ReceivingAddress::Generation(gen_addr) => {
+                    match gen_addr.with_payment_id(BFieldElement::new(pid)) {
+                        Ok(subaddr) => ReceivingAddress::GenerationSubAddr(subaddr),
+                        Err(e) => {
+                            *notice_arc.lock().await = format!("subaddress: {e}");
+                            *reset_me.lock().await = ResetType::Notice;
+                            refresh_tx.send(()).await.unwrap();
+                            return;
+                        }
+                    }
+                }
+                ReceivingAddress::GenerationSubAddr(_) => {
+                    *notice_arc.lock().await = "cannot add payment_id to a subaddress".to_string();
+                    *reset_me.lock().await = ResetType::Notice;
+                    refresh_tx.send(()).await.unwrap();
+                    return;
+                }
+                ReceivingAddress::Symmetric(_) => {
+                    *notice_arc.lock().await =
+                        "payment_id not supported for symmetric addresses".to_string();
+                    *reset_me.lock().await = ResetType::Notice;
+                    refresh_tx.send(()).await.unwrap();
+                    return;
+                }
+            }
+        };
+
+        // let addr_type = match &valid_address {
+        //     ReceivingAddress::Generation(_) => "Generation (base address)".to_string(),
+        //     ReceivingAddress::GenerationSubAddr(sub) => {
+        //         format!("GenerationSubAddr (payment_id={})", sub.payment_id_u64())
+        //     }
+        //     ReceivingAddress::Symmetric(_) => "Symmetric".to_string(),
+        // };
+        // panic!("DEBUG: valid_address = {}, payment_id input = '{}'", addr_type, payment_id);
 
         // Allow the generation of proves to take some time...
         let mut send_ctx = context::current();
@@ -187,6 +252,7 @@ impl SendScreen {
                     self.amount = "".to_string();
                     self.fee = "".to_string();
                     self.address = "".to_string();
+                    self.payment_id = "".to_string();
                     if let Ok(mut n) = self.notice.try_lock() {
                         *n = "".to_string();
                     }
@@ -216,6 +282,10 @@ impl SendScreen {
                                             ),
                                         ));
                                     }
+                                    SendScreenWidget::PaymentId => {
+                                        *own_focus = SendScreenWidget::Amount;
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                    }
                                     SendScreenWidget::Amount => {
                                         *own_focus = SendScreenWidget::Fee;
                                         escalate_event = Some(DashboardEvent::RefreshScreen);
@@ -228,6 +298,7 @@ impl SendScreen {
                                         // clone outside of async section
                                         let rpc_client = self.rpc_client.clone();
                                         let address = self.address.clone();
+                                        let payment_id = self.payment_id.clone();
                                         let amount = self.amount.clone();
                                         let fee = self.fee.clone();
                                         let notice = self.notice.clone();
@@ -236,8 +307,8 @@ impl SendScreen {
                                         let token = self.token;
 
                                         tokio::spawn(Self::check_and_pay_sequence(
-                                            rpc_client, token, address, amount, fee, notice,
-                                            reset_me, network, refresh_tx,
+                                            rpc_client, token, address, payment_id, amount, fee,
+                                            notice, reset_me, network, refresh_tx,
                                         ));
                                     }
                                     SendScreenWidget::Notice => {
@@ -250,7 +321,8 @@ impl SendScreen {
                             if let Ok(mut own_focus) = self.focus.try_lock() {
                                 *own_focus = match own_focus.to_owned() {
                                     SendScreenWidget::Address => SendScreenWidget::Ok,
-                                    SendScreenWidget::Amount => SendScreenWidget::Address,
+                                    SendScreenWidget::PaymentId => SendScreenWidget::Address,
+                                    SendScreenWidget::Amount => SendScreenWidget::PaymentId,
                                     SendScreenWidget::Fee => SendScreenWidget::Amount,
                                     SendScreenWidget::Ok => SendScreenWidget::Fee,
                                     SendScreenWidget::Notice => SendScreenWidget::Notice,
@@ -263,7 +335,8 @@ impl SendScreen {
                         KeyCode::Down => {
                             if let Ok(mut own_focus) = self.focus.try_lock() {
                                 *own_focus = match own_focus.to_owned() {
-                                    SendScreenWidget::Address => SendScreenWidget::Amount,
+                                    SendScreenWidget::Address => SendScreenWidget::PaymentId,
+                                    SendScreenWidget::PaymentId => SendScreenWidget::Amount,
                                     SendScreenWidget::Amount => SendScreenWidget::Fee,
                                     SendScreenWidget::Fee => SendScreenWidget::Ok,
                                     SendScreenWidget::Ok => SendScreenWidget::Address,
@@ -276,7 +349,13 @@ impl SendScreen {
                         }
                         KeyCode::Char(c) => {
                             if let Ok(own_focus) = self.focus.try_lock() {
-                                if own_focus.to_owned() == SendScreenWidget::Amount {
+                                if own_focus.to_owned() == SendScreenWidget::PaymentId {
+                                    // Only allow digits for payment_id
+                                    if c.is_ascii_digit() {
+                                        self.payment_id = format!("{}{}", self.payment_id, c);
+                                        escalate_event = Some(DashboardEvent::RefreshScreen);
+                                    }
+                                } else if own_focus.to_owned() == SendScreenWidget::Amount {
                                     self.amount = format!("{}{}", self.amount, c);
                                     escalate_event = Some(DashboardEvent::RefreshScreen);
                                 } else if own_focus.to_owned() == SendScreenWidget::Fee {
@@ -291,6 +370,12 @@ impl SendScreen {
                         }
                         KeyCode::Backspace => {
                             if let Ok(own_focus) = self.focus.try_lock() {
+                                if own_focus.to_owned() == SendScreenWidget::PaymentId {
+                                    if !self.payment_id.is_empty() {
+                                        self.payment_id.drain(self.payment_id.len() - 1..);
+                                    }
+                                    escalate_event = Some(DashboardEvent::RefreshScreen);
+                                }
                                 if own_focus.to_owned() == SendScreenWidget::Amount {
                                     if !self.amount.is_empty() {
                                         self.amount.drain(self.amount.len() - 1..);
@@ -315,7 +400,7 @@ impl SendScreen {
                 DashboardEvent::ConsoleMode(ConsoleIO::InputSupplied(string)) => {
                     if let Ok(mut own_focus) = self.focus.try_lock() {
                         string.trim().clone_into(&mut self.address);
-                        *own_focus = SendScreenWidget::Amount;
+                        *own_focus = SendScreenWidget::PaymentId;
                         escalate_event = Some(DashboardEvent::RefreshScreen);
                     } else {
                         escalate_event = Some(DashboardEvent::ConsoleMode(
@@ -428,6 +513,45 @@ impl Widget for SendScreen {
                 let instructions_widget = Paragraph::new(instructions).style(style);
                 instructions_widget.render(instruction_rect, buf);
             }
+
+            // display payment_id widget (optional, leave empty for no payment_id)
+            let payment_id = self.payment_id;
+            let payment_id_rect = vrecter.next(3);
+            let payment_id_widget = Paragraph::new(Line::from(vec![
+                Span::from(payment_id),
+                if own_focus == SendScreenWidget::PaymentId {
+                    Span::styled(
+                        "|",
+                        if self.in_focus {
+                            Style::default().add_modifier(Modifier::RAPID_BLINK)
+                        } else {
+                            style
+                        },
+                    )
+                } else {
+                    Span::from(" ")
+                },
+            ]))
+            .style(
+                if own_focus == SendScreenWidget::PaymentId && self.in_focus {
+                    focus_style
+                } else {
+                    style
+                },
+            )
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Payment ID (optional)")
+                    .style(
+                        if own_focus == SendScreenWidget::PaymentId && self.in_focus {
+                            focus_style
+                        } else {
+                            style
+                        },
+                    ),
+            );
+            payment_id_widget.render(payment_id_rect, buf);
 
             // display amount widget
             let amount = self.amount;

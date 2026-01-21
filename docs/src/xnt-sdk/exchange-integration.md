@@ -35,6 +35,7 @@ import {
   XntNetwork,
   XntWalletEntropy,
   XntAddress,
+  XntSubAddress,
   XntRpcClient,
   XntTransactionBuilder,
   XntMembershipProof,
@@ -256,6 +257,30 @@ pending.paymentId           // number
 
 Full transaction build, prove, and submit.
 
+### Output Methods
+
+Two ways to add outputs:
+
+| Method | Use Case |
+|--------|----------|
+| `addOutput(addr, amount, sr)` | Send to any address (main or subaddress) |
+| `addOutputWithPaymentId(addr, amount, sr, paymentId)` | Send to main address with payment_id attached |
+
+**`addOutputWithPaymentId` validation:**
+- Address must be a Generation address (not already a subaddress)
+- `paymentId` must be > 0 (null/0 = no payment_id, uses address as-is)
+- Throws error if address is subaddress or symmetric
+
+```typescript
+// Method 1: Send to existing subaddress
+const subaddr = XntSubAddress.fromBech32(subaddrBech32, XntNetwork.Main);
+builder.addOutput(subaddr.toReceivingAddress(), amount, sr);
+
+// Method 2: Send to main address with payment_id
+const mainAddr = XntAddress.fromBech32(mainAddrBech32, XntNetwork.Main);
+builder.addOutputWithPaymentId(mainAddr.toReceivingAddress(), amount, sr, 12345);
+```
+
 ### Amount Helpers
 
 ```typescript
@@ -311,6 +336,15 @@ for (let i = 0; i < selected.length; i++) {
 // Add output (recipient)
 const recipient = XntAddress.fromBech32(recipientBech32, XntNetwork.Main);
 builder.addOutput(recipient.toReceivingAddress(), sendAmount, xntRandomSenderRandomness());
+
+// Or add output with payment_id (creates subaddress output)
+// payment_id: null/0 = no payment_id, non-zero = add payment_id
+builder.addOutputWithPaymentId(
+  recipient.toReceivingAddress(),
+  sendAmount,
+  xntRandomSenderRandomness(),
+  12345  // payment_id (optional)
+);
 
 // Set fee and change
 builder.setFee(fee);
